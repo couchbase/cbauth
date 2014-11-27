@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package cbauth provides auth{N,Z} for couchbase server services.
 package cbauth
 
 import (
@@ -26,18 +27,47 @@ import (
 	"strings"
 )
 
+// TODO: consider API that would allow us to do digest auth behind the
+// scene
+
+// TODO: for GetHTTPServiceAuth consider something more generic such
+// as GetHTTPAuthHeader. Or even maybe RoundTrip. So that we can
+// handle digest auth
+
+// Authenticator is main cbauth interface. It supports both incoming
+// and outgoing auth.
 type Authenticator interface {
-	// TODO: consider API that would allow us to do digest auth behind the scene
+	// AuthWebCreds method extracts credentials from given http request.
 	AuthWebCreds(req *http.Request) (creds Creds, err error)
+	// Auth method constructs credentials from given user and password pair.
 	Auth(user, pwd string) (creds Creds, err error)
+	// GetHTTPServiceAuth returns user/password creds giving
+	// "admin" access to given http service inside couchbase cluster.
 	GetHTTPServiceAuth(hostport string) (user, pwd string, err error)
+	// GetMemcachedServiceAuth returns user/password creds given
+	// "admin" access to given memcached service.
 	GetMemcachedServiceAuth(hostport string) (user, pwd string, err error)
 }
 
+// Creds type represents credentials and answers queries on this creds
+// authorized actions. Note: it'll become (possibly much) wider API in
+// future, but it's main purpose right now is to get us started.
 type Creds interface {
+	// IsAdmin method returns true iff this creds represent valid
+	// admin account.
 	IsAdmin() (bool, error)
+	// CanAccessBucket method returns true iff this creds
+	// represent valid account that can read/write/query docs in given
+	// bucket.
 	CanAccessBucket(bucket string) (bool, error)
+	// CanReadBucket method returns true iff this creds represent
+	// valid account that can read (but not necessarily write)
+	// docs in given bucket.
 	CanReadBucket(bucket string) (bool, error)
+	// CanDDLBucket method returns true iff this creds represent
+	// valid account that can DDL in given bucket. Note that at
+	// this time it delegates to CanAccessBucket in only
+	// implementation.
 	CanDDLBucket(bucket string) (bool, error)
 }
 
@@ -246,6 +276,10 @@ func (db *httpAuthenticator) GetMemcachedServiceAuth(hostport string) (user, pwd
 	return doGetAuthCall(db, hostport, "getMcdAuth")
 }
 
+// NewDefaultAuthenticator constructs default Authenticator
+// implementation that speaks to given (presumably ns_server) endpoint
+// using given auth and http transport. This is mainly intended for
+// tests.
 func NewDefaultAuthenticator(authURL, authU, authP string, rt http.RoundTripper) Authenticator {
 	if rt == nil {
 		rt = http.DefaultTransport

@@ -21,7 +21,10 @@ import (
 	"os"
 )
 
-// TODO: consider prettyfing that default thingy.
+// Default variable holds default authenticator. Default authenticator
+// is constructed automatically from environment variables passed by
+// ns_server. It is nil if your process was not (correctly) spawned by
+// ns_server.
 var Default Authenticator
 
 func init() {
@@ -33,12 +36,20 @@ func init() {
 	}
 }
 
+// NotInitializedError is used to signal that ns_server environment
+// variables are not set, and thus Default authenticator is not
+// configured for calls that use default authenticator.
 var NotInitializedError = errors.New("cbauth was not initialized")
 
+// WithDefault calls given body with default authenticator. If default
+// authenticator is not configured, it returns NotInitializedError.
 func WithDefault(body func(a Authenticator) error) error {
 	return WithAuthenticator(nil, body)
 }
 
+// WithAuthenticator calls given body with either passed authenticator
+// or default authenticator if `a' is nil. NotInitializedError is
+// returned if a is nil and default authenticator is not configured.
 func WithAuthenticator(a Authenticator, body func(a Authenticator) error) error {
 	if a == nil {
 		a = Default
@@ -49,6 +60,8 @@ func WithAuthenticator(a Authenticator, body func(a Authenticator) error) error 
 	return body(a)
 }
 
+// AuthWebCreds method extracts credentials from given http request
+// using default authenticator.
 func AuthWebCreds(req *http.Request) (creds Creds, err error) {
 	if Default == nil {
 		return nil, NotInitializedError
@@ -56,6 +69,8 @@ func AuthWebCreds(req *http.Request) (creds Creds, err error) {
 	return Default.AuthWebCreds(req)
 }
 
+// Auth method constructs credentials from given user and password
+// pair. Uses default authenticator.
 func Auth(user, pwd string) (creds Creds, err error) {
 	if Default == nil {
 		return nil, NotInitializedError
@@ -63,6 +78,9 @@ func Auth(user, pwd string) (creds Creds, err error) {
 	return Default.Auth(user, pwd)
 }
 
+// GetHTTPServiceAuth returns user/password creds giving "admin"
+// access to given http service inside couchbase cluster. Uses default
+// authenticator.
 func GetHTTPServiceAuth(hostport string) (user, pwd string, err error) {
 	if Default == nil {
 		return "", "", NotInitializedError
@@ -70,6 +88,8 @@ func GetHTTPServiceAuth(hostport string) (user, pwd string, err error) {
 	return Default.GetHTTPServiceAuth(hostport)
 }
 
+// GetMemcachedServiceAuth returns user/password creds given "admin"
+// access to given memcached service. Uses default authenticator.
 func GetMemcachedServiceAuth(hostport string) (user, pwd string, err error) {
 	if Default == nil {
 		return "", "", NotInitializedError

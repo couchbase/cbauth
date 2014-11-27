@@ -19,6 +19,11 @@ import (
 	"net/http"
 )
 
+// SetRequestAuthVia sets basic auth header in given http request
+// according to given authenticator. It will extract target
+// hostname/port from request and figure out right service credentials
+// for that endpoint. If nil authenticator is passed, Default
+// authenticator is used.
 func SetRequestAuthVia(req *http.Request, a Authenticator) error {
 	return WithAuthenticator(a, func(a Authenticator) (err error) {
 		user, pwd, err := a.GetHTTPServiceAuth(req.URL.Host)
@@ -30,6 +35,9 @@ func SetRequestAuthVia(req *http.Request, a Authenticator) error {
 	})
 }
 
+// SetRequestAuth sets basic auth header in given http request
+// according to default authenticator. Simply calls SetRequestAuthVia
+// with nil authenticator.
 func SetRequestAuth(req *http.Request) error {
 	return SetRequestAuthVia(req, nil)
 }
@@ -66,6 +74,9 @@ func (rt *cbauthRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	return rt.slave.RoundTrip(req)
 }
 
+// WrapHTTPTransport constructs http transport that automatically does
+// SetRequestAuthVia for requests it sends. As usual, if nil
+// authenticator is passed, default authenticator is used.
 func WrapHTTPTransport(transport http.RoundTripper, a Authenticator) http.RoundTripper {
 	return &cbauthRoundTripper{
 		slave: transport,
@@ -73,6 +84,7 @@ func WrapHTTPTransport(transport http.RoundTripper, a Authenticator) http.RoundT
 	}
 }
 
+// SendUnauthorized sends 401 Unauthorized response on given response writer.
 func SendUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", "Basic realm=\"Couchbase\"")
 	http.Error(w, "need auth", http.StatusUnauthorized)
