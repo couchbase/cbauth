@@ -123,6 +123,9 @@ func extractCreds(req *http.Request) (user string, pwd string, err error) {
 	auth := req.Header.Get("Authorization")
 	basicPrefix := "Basic "
 	if !strings.HasPrefix(auth, basicPrefix) {
+		if auth != "" {
+			err = errors.New("Non-basic auth is not supported")
+		}
 		return
 	}
 	decodedAuth, err := base64.StdEncoding.DecodeString(auth[len(basicPrefix):])
