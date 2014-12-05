@@ -53,6 +53,8 @@ type Authenticator interface {
 // authorized actions. Note: it'll become (possibly much) wider API in
 // future, but it's main purpose right now is to get us started.
 type Creds interface {
+	// Name method returns user name (e.g. for auditing)
+	Name() string
 	// IsAdmin method returns true iff this creds represent valid
 	// admin account.
 	IsAdmin() (bool, error)
@@ -111,6 +113,10 @@ func maybeVerifySimple(c *simpleCreds, bucket string, cont func() bool) (bool, e
 		return false, err
 	}
 	return cont(), nil
+}
+
+func (c *simpleCreds) Name() string {
+	return c.user
 }
 
 func (c *simpleCreds) IsAdmin() (bool, error) {
