@@ -2,9 +2,12 @@ package main
 
 import (
 	"flag"
+	"io"
 	"log"
+	"net/rpc"
 	"os"
 
+	"github.com/couchbase/cbauth/revrpc"
 	"github.com/couchbase/cbauth/saslauthd"
 )
 
@@ -16,6 +19,53 @@ var (
 	tryAuth bool
 	tryMany int
 )
+
+// SASLDAuth is type exported via rpc.
+type SASLDAuth struct{}
+
+// AuthReq is struct used by request of SASLDAuth.Check
+type AuthReq struct {
+	User string
+	Pwd  string
+}
+
+// Check method verifies given creds.
+func (sa SASLDAuth) Check(req *AuthReq, ok *bool) (err error) {
+	*ok, err = saslauthd.Auth(req.User, req.Pwd, service, realm)
+	return
+}
+
+func setupPortRPC(rs *rpc.Server) error {
+	rs.Register(SASLDAuth{})
+	return nil
+}
+
+func runStdinWatcher() {
+	var buf [1]byte
+	for {
+		count, err := os.Stdin.Read(buf[:])
+		if count > 0 {
+			ch := buf[0]
+			if ch == '\n' {
+				log.Print("Got EOL. Exiting")
+				break
+			}
+		}
+		if err == io.EOF {
+			log.Print("Got EOF. Exiting")
+			break
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	os.Exit(0)
+}
+
+func doRunPort() error {
+	go runStdinWatcher()
+	return revrpc.BabysitService(setupPortRPC, nil, nil)
+}
 
 func main() {
 	flag.StringVar(&name, "user", "", "username to --try auth for")
@@ -38,10 +88,13 @@ func main() {
 	}
 
 	if !tryAuth {
-		log.Print("Non --try mode is not implemented yet")
-		os.Exit(1)
+		log.Fatal(doRunPort())
+	} else {
+		doRunTry()
 	}
+}
 
+func doRunTry() {
 	if tryMany > 0 {
 		runTryMany(tryMany)
 	} else {
