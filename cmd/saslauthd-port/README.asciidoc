@@ -1,0 +1,116 @@
+= Purpose and developer setup of saslauthd-port
+Aliaksey Kandratsenka <alk@tut.by>
+
+== What it's for
+
+This little program is bridging Couchbase Server `ns_server` component
+and saslauthd program from cyrus-sasl package. The purpose of that is
+providing ldap (as well as pam and other kinds of) authentication for
+couchbase server.
+
+== How does it work
+
+It works by speaking to local saslauthd deamon over unix domain
+socket. This is a bit undocumented and internal, private API of
+cyrus-sasl. It can be argued that doing it via libsasl2 would be
+better way. But it does look like saslauthd protocol is reasonably
+stable in practice. And most importantly dealing with libsasl2 from
+golang is not as easy as dealing with saslauthd directly.
+
+saslauthd-port program is designed to receive auth requests from
+`ns_server` via revrpc facility.
+
+== Setting up simplified dev environment for testing
+
+If you're ok with stubbing auth, then take a look at fake-saslauthd.rb
+in this directory. It'll simulate saslauthd. Username is "alk" (well,
+any name will work except for usernames starting with but not equal to
+"alk") and password is "AsdQwe!23".
+
+== Setting up local LDAP server
+
+=== Via adelton/freeipa-server docker image
+
+* `# docker run --dns 127.0.0.1 --name freeipa-server-container -ti -h ipa.example.test -e PASSWORD=SomePassword123 adelton/freeipa-server`
+
+* when it completes do ifconfig inside container and update /etc/hosts
+  to point ipa.example.test to that container. I.e. it could be 172.17.0.2
+
+* go to https://ipa.example.test (it will autoredirect to
+  ipa.example.test anyways).
+
+* login as admin with password SomePassword123 (configured at first step)
+
+* create user or two in intuitive UI. In my case that's user "alk"
+  with password "AsdQwe!23"
+
+* configure local saslauthd by:
+
+** enabling it. On my debian box that's editing
+   /etc/defaults/saslauthd and changing START=yes MECHANISMS="ldap".
+   Then start it via initscript or systemctl (e.g. `#
+   /etc/init.d/saslauthd start`).
+
+** configuring it. Create /etc/saslauthd.conf and put the following:
+
+ ldap_servers: ldap://ipa.example.test/
+ ldap_search_base: cn=users,cn=accounts,dc=example,dc=test
+
+** testing it. If everything is right, then the following should say "OK". E.g:
+
+ # testsaslauthd -u alk -p 'AsdQwe!23'
+ 0: OK "Success."
+
+Upside of IPA is very nice UI plus built-in Kerberos.
+
+One downside of this approach that I found is that container may have
+hard time booting after it was stopped. If you need somebody to blame,
+the would be either systemd or lack of docker's support for systemd,
+whichever is more appropriate for your "political orientation". For
+that reason, I'll describe second way of setting up ldap auth via
+docker.
+
+== Via turnkeylinux/openldap-13 docker image
+
+This image is a bit more basic. It gives you openldap with fancy web
+UI. But no kerberos and no built-in groups.
+
+* `# docker run -i -t turnkeylinux/openldap-13.0`
+
+* follow instructions on
+  https://registry.hub.docker.com/u/turnkeylinux/openldap-13.0/ on how
+  to recover "random root password" and do first time setup (it
+  requires ssh-ing into container). This will guide you through basic
+  configuration of container such us defining root password, ldap
+  admin password and ldap base (in my case it was ipa.example.test to
+  match ipa case above).
+
+* note that I had some issue after install that ldaps process was
+  running with stale config. I fixed it by killing it manually
+  (`/etc/init.d/ldaps stop` did not work). And then starting it back
+  via initscript.
+
+* then follow instructions on
+  https://www.digitalocean.com/community/tutorials/how-to-install-and-configure-a-basic-ldap-server-on-an-ubuntu-12-04-vps#AddOrganizationalUnits,Groups,andUsers
+  to create basic structure of user groups and one or two user
+  accounts.
+
+* in the end I got something like: http://i.imgur.com/LsOw6Yw.png
+
+image::http://i.imgur.com/LsOw6Yw.png[]
+
+* configure local saslauthd by:
+
+** enabling it. On my debian box that's editing
+   /etc/defaults/saslauthd and changing START=yes
+   MECHANISMS="ldap". Then start it via initscript or systemctl.
+
+** configuring it. Create /etc/saslauthd.conf and put the following (replacing ip address accordingly):
+
+ ldap_servers: ldap://172.17.0.3/
+ ldap_search_base: ou=users,dc=ipa,dc=example,dc=test
+
+** testing it. If everything is right, then the following should say "OK". E.g:
+
+ # testsaslauthd -u alk -p 'AsdQwe!23'
+ 0: OK "Success."
