@@ -47,7 +47,7 @@ func (rt *testingRoundTripper) setAuth(user, pwd string) *testingRoundTripper {
 	return rt
 }
 
-func NewTestingRT(method, uri string) *testingRoundTripper {
+func newTestingRT(method, uri string) *testingRoundTripper {
 	return &testingRoundTripper{
 		method:         method,
 		url:            uri,
@@ -87,7 +87,7 @@ func (rt *testingRoundTripper) RoundTrip(req *http.Request) (res *http.Response,
 	err = req.ParseForm()
 	assertNoError(err)
 
-	for k, _ := range req.PostForm {
+	for k := range req.PostForm {
 		if _, ok := rt.expectedValues[k]; !ok {
 			log.Fatalf("Unexpected POST param: %v", k)
 		}
@@ -186,7 +186,7 @@ func TestBasicAdmin(t *testing.T) {
 	tokenU := "@cookie"
 	tokenP := "asda2s"
 
-	tr := NewTestingRT("POST", url).setAuth(tokenU, tokenP)
+	tr := newTestingRT("POST", url).setAuth(tokenU, tokenP)
 	a := NewDefaultAuthenticator(url, tokenU, tokenP, tr)
 
 	tr.setExpected(`{"method": "auth", "user": "admin", "pwd": "asdasd"}`)
@@ -230,7 +230,7 @@ func TestROAdmin(t *testing.T) {
 	tokenU := "@cookie"
 	tokenP := "asda2s"
 
-	tr := NewTestingRT("POST", url).setAuth(tokenU, tokenP)
+	tr := newTestingRT("POST", url).setAuth(tokenU, tokenP)
 	a := NewDefaultAuthenticator(url, tokenU, tokenP, tr)
 
 	tr.setExpected(`{"method": "auth", "user": "admin", "pwd": "asdasd"}`)
@@ -274,7 +274,7 @@ func TestBasicBucket(t *testing.T) {
 	tokenU := "@cookie"
 	tokenP := "asda2s"
 
-	tr := NewTestingRT("POST", url).setAuth(tokenU, tokenP)
+	tr := newTestingRT("POST", url).setAuth(tokenU, tokenP)
 	a := NewDefaultAuthenticator(url, tokenU, tokenP, tr)
 
 	req, err := http.NewRequest("GET", "http://q:11234/foo/_query", nil)

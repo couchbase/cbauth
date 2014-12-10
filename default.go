@@ -36,25 +36,25 @@ func init() {
 	}
 }
 
-// NotInitializedError is used to signal that ns_server environment
+// ErrNotInitialized is used to signal that ns_server environment
 // variables are not set, and thus Default authenticator is not
 // configured for calls that use default authenticator.
-var NotInitializedError = errors.New("cbauth was not initialized")
+var ErrNotInitialized = errors.New("cbauth was not initialized")
 
 // WithDefault calls given body with default authenticator. If default
-// authenticator is not configured, it returns NotInitializedError.
+// authenticator is not configured, it returns ErrNotInitialized.
 func WithDefault(body func(a Authenticator) error) error {
 	return WithAuthenticator(nil, body)
 }
 
 // WithAuthenticator calls given body with either passed authenticator
-// or default authenticator if `a' is nil. NotInitializedError is
+// or default authenticator if `a' is nil. ErrNotInitialized is
 // returned if a is nil and default authenticator is not configured.
 func WithAuthenticator(a Authenticator, body func(a Authenticator) error) error {
 	if a == nil {
 		a = Default
 		if a == nil {
-			return NotInitializedError
+			return ErrNotInitialized
 		}
 	}
 	return body(a)
@@ -64,7 +64,7 @@ func WithAuthenticator(a Authenticator, body func(a Authenticator) error) error 
 // using default authenticator.
 func AuthWebCreds(req *http.Request) (creds Creds, err error) {
 	if Default == nil {
-		return nil, NotInitializedError
+		return nil, ErrNotInitialized
 	}
 	return Default.AuthWebCreds(req)
 }
@@ -73,7 +73,7 @@ func AuthWebCreds(req *http.Request) (creds Creds, err error) {
 // pair. Uses default authenticator.
 func Auth(user, pwd string) (creds Creds, err error) {
 	if Default == nil {
-		return nil, NotInitializedError
+		return nil, ErrNotInitialized
 	}
 	return Default.Auth(user, pwd)
 }
@@ -83,7 +83,7 @@ func Auth(user, pwd string) (creds Creds, err error) {
 // authenticator.
 func GetHTTPServiceAuth(hostport string) (user, pwd string, err error) {
 	if Default == nil {
-		return "", "", NotInitializedError
+		return "", "", ErrNotInitialized
 	}
 	return Default.GetHTTPServiceAuth(hostport)
 }
@@ -92,7 +92,7 @@ func GetHTTPServiceAuth(hostport string) (user, pwd string, err error) {
 // access to given memcached service. Uses default authenticator.
 func GetMemcachedServiceAuth(hostport string) (user, pwd string, err error) {
 	if Default == nil {
-		return "", "", NotInitializedError
+		return "", "", ErrNotInitialized
 	}
 	return Default.GetMemcachedServiceAuth(hostport)
 }

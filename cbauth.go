@@ -143,17 +143,17 @@ func (c *simpleCreds) CanReadBucket(bucket string) (bool, error) {
 	})
 }
 
-func (p *simpleCreds) CanDDLBucket(bucket string) (bool, error) {
-	return p.CanAccessBucket(bucket)
+func (c *simpleCreds) CanDDLBucket(bucket string) (bool, error) {
+	return c.CanAccessBucket(bucket)
 }
 
 type nilCredsDB struct{}
 
-func (_ nilCredsDB) VerifyCreds(user, pwd, bucket string) (allowed, isAdmin, isRoAdmin bool, err error) {
+func (c nilCredsDB) VerifyCreds(user, pwd, bucket string) (allowed, isAdmin, isRoAdmin bool, err error) {
 	return false, false, false, nil
 }
 
-var nilCreds *simpleCreds = &simpleCreds{verified: true, db: nilCredsDB{}}
+var nilCreds = &simpleCreds{verified: true, db: nilCredsDB{}}
 
 func extractCreds(req *http.Request) (user string, pwd string, err error) {
 	auth := req.Header.Get("Authorization")
