@@ -142,7 +142,7 @@ func (rt *testingRoundTripper) resetTripped() {
 
 func (rt *testingRoundTripper) assertTripped(expected bool) {
 	if rt.tripped != expected {
-		log.Fatalf("Tripped is not expected. Have: %s, need: %s", rt.tripped, expected)
+		log.Fatalf("Tripped is not expected. Have: %v, need: %v", rt.tripped, expected)
 	}
 }
 
