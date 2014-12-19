@@ -220,6 +220,10 @@ var DefaultBabysitErrorPolicy BabysitErrorPolicy = DefaultErrorPolicy{
 }
 
 func (p *DefaultErrorPolicy) try(err error) error {
+	if (err == ErrCBAuthServiceUnconfigured) {
+		p.LogPrint(fmt.Sprintf("RevRpc connection was not started: %s.", err))
+		return err
+	}
 	p.restartsLeft--
 	if p.restartsLeft <= 0 {
 		if err == nil {
