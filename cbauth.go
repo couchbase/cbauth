@@ -213,7 +213,7 @@ func (db *httpAuthenticator) doCall(method string, values url.Values, resp inter
 
 type credsResponse struct {
 	IsAdmin   bool
-	IsROAdmin bool `json:isROAdmin`
+	IsROAdmin bool `json:"isROAdmin"`
 	Allowed   bool
 }
 
