@@ -198,6 +198,7 @@ func (db *httpAuthenticator) doCall(method string, values url.Values, resp inter
 	if err != nil {
 		return
 	}
+	defer hresp.Body.Close()
 	if hresp.StatusCode != 200 {
 		err = errors.New("Expecting 200 from ns_server auth endpoint")
 		return
