@@ -18,10 +18,10 @@ package cbauth
 
 import (
 	"encoding/json"
-	"errors"
+	"fmt"
+	"github.com/couchbase/cbauth/cache"
 	"io/ioutil"
 	"net/http"
-	"net/url"
 )
 
 // TODO: consider API that would allow us to do digest auth behind the
@@ -76,7 +76,7 @@ type Creds interface {
 }
 
 type credsDB interface {
-	VerifyCreds(req *http.Request) (user, role string, buckets []string, err error)
+	VerifyCreds(req *http.Request) (user, role string, buckets map[string]bool, err error)
 }
 
 type simpleCreds struct {
@@ -98,7 +98,8 @@ func (c *simpleCreds) IsROAdmin() (bool, error) {
 }
 
 func (c *simpleCreds) CanAccessBucket(bucket string) (bool, error) {
-	return c.role == "admin" || c.buckets[bucket], nil
+	return c.role == "admin" || (c.role == "bucket" && c.user == bucket) ||
+		(c.role == "anonymous" && c.buckets[bucket]), nil
 }
 
 func (c *simpleCreds) CanReadBucket(bucket string) (bool, error) {
@@ -110,16 +111,14 @@ func (c *simpleCreds) CanDDLBucket(bucket string) (bool, error) {
 }
 
 type httpAuthenticator struct {
-	client     *http.Client
-	authURL    string
-	authTokenU string
-	authTokenP string
+	client  *http.Client
+	authURL string
+	cache   *cache.AuthCache
 }
 
 type credsResponse struct {
-	Role    string
-	User    string
-	Buckets []string
+	Role string
+	User string
 }
 
 func copyHeader(reqFrom, reqTo *http.Request, name string) {
@@ -128,13 +127,24 @@ func copyHeader(reqFrom, reqTo *http.Request, name string) {
 	}
 }
 
-func (db *httpAuthenticator) VerifyCreds(reqToAuth *http.Request) (user, role string, buckets []string, err error) {
+func (db *httpAuthenticator) VerifyCreds(req *http.Request) (user, role string, buckets map[string]bool, err error) {
+	user, role, buckets, err = db.cache.VerifyCreds(req)
+	if err == cache.ErrAuthNotSupportedByCache {
+		user, role, err = db.verifyToken(req)
+		return
+	}
+	if err == cache.Err401 {
+		return "", "", nil, nil
+	}
+	return
+}
+
+func (db *httpAuthenticator) verifyToken(reqToAuth *http.Request) (user, role string, err error) {
 	req, err := http.NewRequest("POST", db.authURL, nil)
 	if err != nil {
 		return
 	}
 	copyHeader(reqToAuth, req, "ns_server-ui")
-	copyHeader(reqToAuth, req, "Authorization")
 	copyHeader(reqToAuth, req, "Cookie")
 
 	client := db.client
@@ -144,9 +154,9 @@ func (db *httpAuthenticator) VerifyCreds(reqToAuth *http.Request) (user, role st
 	}
 	defer hresp.Body.Close()
 	if hresp.StatusCode == 401 {
-		return "", "", nil, nil
+		return "", "", nil
 	} else if hresp.StatusCode != 200 {
-		err = errors.New("Expecting 200 or 401 from ns_server auth endpoint")
+		err = fmt.Errorf("Expecting 200 or 401 from ns_server auth endpoint. Got: %s", hresp.Status)
 		return
 	}
 	body, err := ioutil.ReadAll(hresp.Body)
@@ -159,7 +169,7 @@ func (db *httpAuthenticator) VerifyCreds(reqToAuth *http.Request) (user, role st
 	if err != nil {
 		return
 	}
-	return resp.User, resp.Role, resp.Buckets, nil
+	return resp.User, resp.Role, nil
 }
 
 func (db *httpAuthenticator) Auth(user, pwd string) (Creds, error) {
@@ -176,74 +186,38 @@ func (db *httpAuthenticator) AuthWebCreds(req *http.Request) (creds Creds, err e
 	if err != nil {
 		return nil, err
 	}
-	mapBuckets := make(map[string]bool)
-	for _, b := range buckets {
-		mapBuckets[b] = true
-	}
 
 	return &simpleCreds{
 		user:    user,
 		role:    role,
-		buckets: mapBuckets,
+		buckets: buckets,
 	}, nil
 }
 
-type getAuthResponse struct {
-	User string
-	Pwd  string
-}
-
-func doGetAuthCall(db *httpAuthenticator, hostport string, call string) (user, pwd string, err error) {
-	url := db.authURL + "/" + url.QueryEscape(hostport) + "/" + call
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return
-	}
-	req.SetBasicAuth(db.authTokenU, db.authTokenP)
-	client := db.client
-	hresp, err := client.Do(req)
-	if err != nil {
-		return
-	}
-	defer hresp.Body.Close()
-	if hresp.StatusCode != 200 {
-		err = errors.New("Expecting 200 from ns_server auth endpoint")
-		return
-	}
-	body, err := ioutil.ReadAll(hresp.Body)
-	if err != nil {
-		return
-	}
-
-	resp := getAuthResponse{}
-	err = json.Unmarshal(body, &resp)
-	if err != nil {
-		return
-	}
-	return resp.User, resp.Pwd, nil
-}
-
 func (db *httpAuthenticator) GetHTTPServiceAuth(hostport string) (user, pwd string, err error) {
-	return doGetAuthCall(db, hostport, "http")
+	return db.cache.GetHTTPServiceAuth(hostport)
 }
 
 func (db *httpAuthenticator) GetMemcachedServiceAuth(hostport string) (user, pwd string, err error) {
-	return doGetAuthCall(db, hostport, "mcd")
+	return db.cache.GetMemcachedServiceAuth(hostport)
 }
 
 // NewDefaultAuthenticator constructs default Authenticator
 // implementation that speaks to given (presumably ns_server) endpoint
 // using given auth and http transport. This is mainly intended for
 // tests.
-func NewDefaultAuthenticator(authURL, authU, authP string, rt http.RoundTripper) Authenticator {
+func NewDefaultAuthenticator(authURL string, rt http.RoundTripper) Authenticator {
+	return newHTTPAuthenticator(authURL, rt, true)
+}
+
+func newHTTPAuthenticator(authURL string, rt http.RoundTripper, runRevRPC bool) *httpAuthenticator {
 	if rt == nil {
 		rt = http.DefaultTransport
 	}
 	client := &http.Client{Transport: rt}
 	return &httpAuthenticator{
-		authURL:    authURL,
-		authTokenU: authU,
-		authTokenP: authP,
-		client:     client,
+		authURL: authURL,
+		client:  client,
+		cache:   cache.StartAuthCache(runRevRPC),
 	}
 }

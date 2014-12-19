@@ -17,6 +17,7 @@ package cbauth
 
 import (
 	"fmt"
+	"github.com/couchbase/cbauth/cache"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -28,7 +29,6 @@ type testingRoundTripper struct {
 	method  string
 	url     string
 	user    string
-	auth    string
 	token   string
 	role    string
 	tripped bool
@@ -69,20 +69,13 @@ func (rt *testingRoundTripper) RoundTrip(req *http.Request) (res *http.Response,
 			statusCode = 401
 		}
 	} else {
-		if req.Header.Get("Authorization") != rt.auth {
-			statusCode = 401
-		}
+		log.Fatal("Expect to be called only with ns_server-ui=yes")
 	}
 
 	response := ""
 	status := "401 Unauthorized"
 	if statusCode == 200 {
-		if rt.role == "bucket" {
-			response = fmt.Sprintf(`{"role": "%s", "user": "%s", "buckets": ["%s"]}`,
-				rt.role, rt.user, rt.user)
-		} else {
-			response = fmt.Sprintf(`{"role": "%s", "user": "%s"}`, rt.role, rt.user)
-		}
+		response = fmt.Sprintf(`{"role": "%s", "user": "%s"}`, rt.role, rt.user)
 		status = "200 OK"
 	}
 
@@ -112,24 +105,10 @@ func (rt *testingRoundTripper) assertTripped(expected bool) {
 	}
 }
 
-func (rt *testingRoundTripper) setAuth(user, pwd, role string) {
-	req, err := http.NewRequest("GET", "http://host", nil)
-	if err != nil {
-		log.Fatalf("Error creating request")
-	}
-	req.SetBasicAuth(user, pwd)
-	rt.token = ""
-	rt.user = user
-	rt.role = role
-	rt.auth = req.Header.Get("Authorization")
-	return
-}
-
 func (rt *testingRoundTripper) setTokenAuth(user, token, role string) {
 	rt.token = token
 	rt.user = user
 	rt.role = role
-	rt.auth = ""
 }
 
 func mustAccessBucket(c Creds, bucket string) bool {
@@ -162,12 +141,26 @@ func mustAuthWebCreds(a Authenticator, req *http.Request) Creds {
 	return c
 }
 
+func updateCache(a *httpAuthenticator, authCache *cache.Cache) {
+	ok := false
+	err := a.cache.UpdateCache(authCache, &ok)
+	assertNoError(err)
+	if !ok {
+		log.Fatal("Unsuccessfull cache update")
+	}
+}
+
+var salt = []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0}
+
 func TestBasicAdmin(t *testing.T) {
 	url := "http://127.0.0.1:9000/_auth"
 
 	tr := newTestingRT("POST", url)
-	tr.setAuth("Administrator", "asdasd", "admin")
-	a := NewDefaultAuthenticator(url, "something", "something", tr)
+	a := newHTTPAuthenticator(url, tr, false)
+
+	authCache := cache.NewTestCache()
+	authCache.SetUser("Administrator", "asdasd", "admin", salt)
+	updateCache(a, authCache)
 
 	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
 	assertNoError(err)
@@ -192,14 +185,22 @@ func TestBasicAdmin(t *testing.T) {
 		t.Errorf("Expected to be able to access all buckets")
 	}
 
-	tr.resetTripped()
-	req.SetBasicAuth("admin", "wrong")
+	tr.assertTripped(false)
+	req.SetBasicAuth("Administrator", "qwerty")
 
 	c = mustAuthWebCreds(a, req)
-	tr.assertTripped(true)
 
 	if mustIsAdmin(c) {
 		t.Errorf("Expect isAdmin to be false")
+	}
+
+	authCache.SetUser("Administrator", "qwerty", "admin", salt)
+	updateCache(a, authCache)
+
+	c = mustAuthWebCreds(a, req)
+
+	if !mustIsAdmin(c) {
+		t.Errorf("Expect isAdmin to be true")
 	}
 }
 
@@ -207,8 +208,11 @@ func TestROAdmin(t *testing.T) {
 	url := "http://127.0.0.1:9000/_auth"
 
 	tr := newTestingRT("POST", url)
-	tr.setAuth("roadmin", "asdasd", "ro_admin")
-	a := NewDefaultAuthenticator(url, "something", "something", tr)
+	a := newHTTPAuthenticator(url, tr, false)
+
+	authCache := cache.NewTestCache()
+	authCache.SetUser("roadmin", "asdasd", "ro_admin", salt)
+	updateCache(a, authCache)
 
 	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
 	assertNoError(err)
@@ -237,8 +241,11 @@ func TestBasicBucket(t *testing.T) {
 	url := "http://127.0.0.1:9000/_auth"
 
 	tr := newTestingRT("POST", url)
-	tr.setAuth("foo", "asdasd", "bucket")
-	a := NewDefaultAuthenticator(url, "something", "something", tr)
+	a := newHTTPAuthenticator(url, tr, false)
+
+	authCache := cache.NewTestCache()
+	authCache.AddBucket("foo", "asdasd")
+	updateCache(a, authCache)
 
 	req, err := http.NewRequest("GET", "http://q:11234/foo/_query", nil)
 	assertNoError(err)
@@ -246,8 +253,7 @@ func TestBasicBucket(t *testing.T) {
 
 	c := mustAuthWebCreds(a, req)
 
-	t.Log("http call is not lazy. Should happen at once")
-	tr.assertTripped(true)
+	tr.assertTripped(false)
 
 	t.Log("bucket foo access should be allowed")
 	if !mustAccessBucket(c, "foo") {
@@ -280,7 +286,7 @@ func TestTokenAdmin(t *testing.T) {
 
 	tr := newTestingRT("POST", url)
 	tr.setTokenAuth("Administrator", "1234567890", "admin")
-	a := NewDefaultAuthenticator(url, "something", "something", tr)
+	a := newHTTPAuthenticator(url, tr, false)
 
 	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
 	assertNoError(err)

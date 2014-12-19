@@ -199,15 +199,15 @@ type BabysitErrorPolicy interface {
 type DefaultErrorPolicy struct {
 	// RestartsToExit determines how many restarts this error
 	// policy will do before giving up.
-	RestartsToExit       int
+	RestartsToExit int
 	// SleepBetweenRestarts specifies duration to sleep between
 	// restarts.
 	SleepBetweenRestarts time.Duration
 	// LogPrint function, if non-nil, is used by
 	// DefaultErrorPolicy to log it's events & decisions.
 	// log.Print function is one suitable implementation.
-	LogPrint             func(args ...interface{})
-	restartsLeft         int
+	LogPrint     func(args ...interface{})
+	restartsLeft int
 }
 
 // DefaultBabysitErrorPolicy is BabysitErrorPolicy instance that is
@@ -220,7 +220,7 @@ var DefaultBabysitErrorPolicy BabysitErrorPolicy = DefaultErrorPolicy{
 }
 
 func (p *DefaultErrorPolicy) try(err error) error {
-	if (err == ErrCBAuthServiceUnconfigured) {
+	if err == ErrCBAuthServiceUnconfigured {
 		p.LogPrint(fmt.Sprintf("RevRpc connection was not started: %s.", err))
 		return err
 	}

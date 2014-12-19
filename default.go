@@ -29,10 +29,8 @@ var Default Authenticator
 
 func init() {
 	authURL := os.Getenv("NS_SERVER_CBAUTH_URL")
-	authU := os.Getenv("NS_SERVER_CBAUTH_USER")
-	authP := os.Getenv("NS_SERVER_CBAUTH_PWD")
 	if authURL != "" {
-		Default = NewDefaultAuthenticator(authURL, authU, authP, nil)
+		Default = NewDefaultAuthenticator(authURL, nil)
 	}
 }
 
