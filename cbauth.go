@@ -17,14 +17,11 @@
 package cbauth
 
 import (
-	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"strings"
 )
 
 // TODO: consider API that would allow us to do digest auth behind the
@@ -58,6 +55,9 @@ type Creds interface {
 	// IsAdmin method returns true iff this creds represent valid
 	// admin account.
 	IsAdmin() (bool, error)
+	// IsAdmin method returns true iff this creds represent valid
+	// read only admin account.
+	IsROAdmin() (bool, error)
 	// CanAccessBucket method returns true iff this creds
 	// represent valid account that can read/write/query docs in given
 	// bucket.
@@ -74,41 +74,38 @@ type Creds interface {
 }
 
 type credsDB interface {
-	VerifyCreds(user, pwd, bucket string) (allowed, isAdmin bool, isRoAdmin bool, err error)
+	VerifyCreds(req *http.Request) (user, role string, buckets []string, err error)
 }
 
 type simpleCreds struct {
-	user      string
-	pwd       string
-	verified  bool
-	isAdmin   bool
-	isROAdmin bool
-	isAllowed bool
-	bucket    string
-	db        credsDB
+	req      *http.Request
+	user     string
+	role     string
+	buckets  map[string]bool
+	verified bool
+	db       credsDB
 }
 
-func verifySimple(c *simpleCreds, bucket string) error {
-	ok, isAdmin, isROAdmin, err := c.db.VerifyCreds(c.user, c.pwd, bucket)
+func verifySimple(c *simpleCreds) error {
+	user, role, buckets, err := c.db.VerifyCreds(c.req)
 	if err != nil {
 		return err
 	}
-	c.verified = true
-	c.isAdmin = isAdmin
-	c.isROAdmin = isROAdmin
-	if ok {
-		c.bucket = bucket
+	c.user = user
+	c.role = role
+	c.buckets = make(map[string]bool)
+	for _, b := range buckets {
+		c.buckets[b] = true
 	}
+	c.verified = true
 	return nil
 }
 
-func maybeVerifySimple(c *simpleCreds, bucket string, cont func() bool) (bool, error) {
+func maybeVerifySimple(c *simpleCreds, cont func() bool) (bool, error) {
 	if c.verified {
-		if c.isAdmin || c.isROAdmin || bucket == "" || c.bucket == bucket {
-			return cont(), nil
-		}
+		return cont(), nil
 	}
-	err := verifySimple(c, bucket)
+	err := verifySimple(c)
 	if err != nil {
 		return false, err
 	}
@@ -116,12 +113,25 @@ func maybeVerifySimple(c *simpleCreds, bucket string, cont func() bool) (bool, e
 }
 
 func (c *simpleCreds) Name() string {
+	if c.verified {
+		return c.user
+	}
+	err := verifySimple(c)
+	if err != nil {
+		return "" //temporary drop the error on the floor. this will be gone after we'll start making non-lazy call
+	}
 	return c.user
 }
 
 func (c *simpleCreds) IsAdmin() (bool, error) {
-	return maybeVerifySimple(c, "", func() bool {
-		return c.isAdmin
+	return maybeVerifySimple(c, func() bool {
+		return c.role == "admin"
+	})
+}
+
+func (c *simpleCreds) IsROAdmin() (bool, error) {
+	return maybeVerifySimple(c, func() bool {
+		return c.role == "admin" || c.role == "ro_admin"
 	})
 }
 
@@ -129,53 +139,17 @@ func (c *simpleCreds) CanAccessBucket(bucket string) (bool, error) {
 	if bucket == "" {
 		return false, nil
 	}
-	return maybeVerifySimple(c, bucket, func() bool {
-		return c.isAdmin || c.bucket == bucket
+	return maybeVerifySimple(c, func() bool {
+		return c.role == "admin" || c.buckets[bucket]
 	})
 }
 
 func (c *simpleCreds) CanReadBucket(bucket string) (bool, error) {
-	if bucket == "" {
-		return false, nil
-	}
-	return maybeVerifySimple(c, bucket, func() bool {
-		return c.isAdmin || c.bucket == bucket || c.isROAdmin
-	})
+	return c.CanAccessBucket(bucket)
 }
 
 func (c *simpleCreds) CanDDLBucket(bucket string) (bool, error) {
 	return c.CanAccessBucket(bucket)
-}
-
-type nilCredsDB struct{}
-
-func (c nilCredsDB) VerifyCreds(user, pwd, bucket string) (allowed, isAdmin, isRoAdmin bool, err error) {
-	return false, false, false, nil
-}
-
-var nilCreds = &simpleCreds{verified: true, db: nilCredsDB{}}
-
-func extractCreds(req *http.Request) (user string, pwd string, err error) {
-	auth := req.Header.Get("Authorization")
-	basicPrefix := "Basic "
-	if !strings.HasPrefix(auth, basicPrefix) {
-		if auth != "" {
-			err = errors.New("Non-basic auth is not supported")
-		}
-		return
-	}
-	decodedAuth, err := base64.StdEncoding.DecodeString(auth[len(basicPrefix):])
-	if err != nil {
-		return
-	}
-	idx := bytes.IndexByte(decodedAuth, ':')
-	if idx < 0 {
-		err = errors.New("Malformed basic auth header")
-		return
-	}
-	user = string(decodedAuth[0:idx])
-	pwd = string(decodedAuth[(idx + 1):])
-	return
 }
 
 type httpAuthenticator struct {
@@ -185,14 +159,80 @@ type httpAuthenticator struct {
 	authTokenP string
 }
 
-func (db *httpAuthenticator) doCall(method string, values url.Values, resp interface{}) (err error) {
-	values.Set("method", method)
-	req, err := http.NewRequest("POST", db.authURL, strings.NewReader(values.Encode()))
+type credsResponse struct {
+	Role    string
+	User    string
+	Buckets []string
+}
+
+func copyHeader(reqFrom, reqTo *http.Request, name string) {
+	if val := reqFrom.Header.Get(name); val != "" {
+		reqTo.Header.Add(name, val)
+	}
+}
+
+func (db *httpAuthenticator) VerifyCreds(reqToAuth *http.Request) (user, role string, buckets []string, err error) {
+	req, err := http.NewRequest("POST", db.authURL, nil)
+	if err != nil {
+		return
+	}
+	copyHeader(reqToAuth, req, "ns_server-ui")
+	copyHeader(reqToAuth, req, "Authorization")
+	copyHeader(reqToAuth, req, "Cookie")
+
+	client := db.client
+	hresp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	defer hresp.Body.Close()
+	if hresp.StatusCode == 401 {
+		return "", "", nil, nil
+	} else if hresp.StatusCode != 200 {
+		err = errors.New("Expecting 200 or 401 from ns_server auth endpoint")
+		return
+	}
+	body, err := ioutil.ReadAll(hresp.Body)
+	if err != nil {
+		return
+	}
+
+	resp := credsResponse{}
+	err = json.Unmarshal(body, &resp)
+	if err != nil {
+		return
+	}
+	return resp.User, resp.Role, resp.Buckets, nil
+}
+
+func (db *httpAuthenticator) Auth(user, pwd string) (Creds, error) {
+	req, err := http.NewRequest("GET", "http://host/", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(user, pwd)
+	return AuthWebCreds(req)
+}
+
+func (db *httpAuthenticator) AuthWebCreds(req *http.Request) (creds Creds, err error) {
+	return &simpleCreds{
+		req: req,
+		db:  db,
+	}, nil
+}
+
+type getAuthResponse struct {
+	User string
+	Pwd  string
+}
+
+func doGetAuthCall(db *httpAuthenticator, hostport string, call string) (user, pwd string, err error) {
+	url := db.authURL + "/" + url.QueryEscape(hostport) + "/" + call
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return
 	}
 	req.SetBasicAuth(db.authTokenU, db.authTokenP)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	client := db.client
 	hresp, err := client.Do(req)
 	if err != nil {
@@ -208,79 +248,20 @@ func (db *httpAuthenticator) doCall(method string, values url.Values, resp inter
 		return
 	}
 
-	return json.Unmarshal(body, resp)
-}
-
-type credsResponse struct {
-	IsAdmin   bool
-	IsROAdmin bool `json:"isROAdmin"`
-	Allowed   bool
-}
-
-func (db *httpAuthenticator) VerifyCreds(user, pwd, bucket string) (allowed, isAdmin, isRoAdmin bool, err error) {
-	values := url.Values{}
-	values.Set("user", user)
-	values.Set("pwd", pwd)
-	if bucket != "" {
-		values.Set("bucket", bucket)
-	}
-	resp := credsResponse{}
-	db.doCall("auth", values, &resp)
-	if err != nil {
-		return
-	}
-	allowed = resp.Allowed
-	isAdmin = resp.IsAdmin
-	isRoAdmin = resp.IsROAdmin
-	return
-}
-
-func (db *httpAuthenticator) Auth(user, pwd string) (Creds, error) {
-	return &simpleCreds{
-		user: user,
-		pwd:  pwd,
-		db:   db,
-	}, nil
-}
-
-func (db *httpAuthenticator) AuthWebCreds(req *http.Request) (creds Creds, err error) {
-	creds = nilCreds
-	user, pwd, err := extractCreds(req)
-	if err != nil {
-		return
-	}
-	creds = &simpleCreds{
-		user: user,
-		pwd:  pwd,
-		db:   db,
-	}
-	return
-}
-
-type getAuthResponse struct {
-	User string
-	Pwd  string
-}
-
-func doGetAuthCall(db *httpAuthenticator, hostport string, call string) (user, pwd string, err error) {
-	values := url.Values{}
-	values.Set("hostport", hostport)
 	resp := getAuthResponse{}
-	err = db.doCall(call, values, &resp)
+	err = json.Unmarshal(body, &resp)
 	if err != nil {
 		return
 	}
-	user = resp.User
-	pwd = resp.Pwd
-	return
+	return resp.User, resp.Pwd, nil
 }
 
 func (db *httpAuthenticator) GetHTTPServiceAuth(hostport string) (user, pwd string, err error) {
-	return doGetAuthCall(db, hostport, "getHTTPAuth")
+	return doGetAuthCall(db, hostport, "http")
 }
 
 func (db *httpAuthenticator) GetMemcachedServiceAuth(hostport string) (user, pwd string, err error) {
-	return doGetAuthCall(db, hostport, "getMcdAuth")
+	return doGetAuthCall(db, hostport, "mcd")
 }
 
 // NewDefaultAuthenticator constructs default Authenticator
