@@ -46,6 +46,8 @@ type Authenticator interface {
 	GetMemcachedServiceAuth(hostport string) (user, pwd string, err error)
 }
 
+// TODO: get rid of unnecessary error returns
+
 // Creds type represents credentials and answers queries on this creds
 // authorized actions. Note: it'll become (possibly much) wider API in
 // future, but it's main purpose right now is to get us started.
@@ -78,70 +80,25 @@ type credsDB interface {
 }
 
 type simpleCreds struct {
-	req      *http.Request
-	user     string
-	role     string
-	buckets  map[string]bool
-	verified bool
-	db       credsDB
-}
-
-func verifySimple(c *simpleCreds) error {
-	user, role, buckets, err := c.db.VerifyCreds(c.req)
-	if err != nil {
-		return err
-	}
-	c.user = user
-	c.role = role
-	c.buckets = make(map[string]bool)
-	for _, b := range buckets {
-		c.buckets[b] = true
-	}
-	c.verified = true
-	return nil
-}
-
-func maybeVerifySimple(c *simpleCreds, cont func() bool) (bool, error) {
-	if c.verified {
-		return cont(), nil
-	}
-	err := verifySimple(c)
-	if err != nil {
-		return false, err
-	}
-	return cont(), nil
+	user    string
+	role    string
+	buckets map[string]bool
 }
 
 func (c *simpleCreds) Name() string {
-	if c.verified {
-		return c.user
-	}
-	err := verifySimple(c)
-	if err != nil {
-		return "" //temporary drop the error on the floor. this will be gone after we'll start making non-lazy call
-	}
 	return c.user
 }
 
 func (c *simpleCreds) IsAdmin() (bool, error) {
-	return maybeVerifySimple(c, func() bool {
-		return c.role == "admin"
-	})
+	return c.role == "admin", nil
 }
 
 func (c *simpleCreds) IsROAdmin() (bool, error) {
-	return maybeVerifySimple(c, func() bool {
-		return c.role == "admin" || c.role == "ro_admin"
-	})
+	return c.role == "admin" || c.role == "ro_admin", nil
 }
 
 func (c *simpleCreds) CanAccessBucket(bucket string) (bool, error) {
-	if bucket == "" {
-		return false, nil
-	}
-	return maybeVerifySimple(c, func() bool {
-		return c.role == "admin" || c.buckets[bucket]
-	})
+	return c.role == "admin" || c.buckets[bucket], nil
 }
 
 func (c *simpleCreds) CanReadBucket(bucket string) (bool, error) {
@@ -215,9 +172,19 @@ func (db *httpAuthenticator) Auth(user, pwd string) (Creds, error) {
 }
 
 func (db *httpAuthenticator) AuthWebCreds(req *http.Request) (creds Creds, err error) {
+	user, role, buckets, err := db.VerifyCreds(req)
+	if err != nil {
+		return nil, err
+	}
+	mapBuckets := make(map[string]bool)
+	for _, b := range buckets {
+		mapBuckets[b] = true
+	}
+
 	return &simpleCreds{
-		req: req,
-		db:  db,
+		user:    user,
+		role:    role,
+		buckets: mapBuckets,
 	}, nil
 }
 

@@ -196,12 +196,11 @@ func TestBasicAdmin(t *testing.T) {
 	req.SetBasicAuth("admin", "wrong")
 
 	c = mustAuthWebCreds(a, req)
+	tr.assertTripped(true)
 
 	if mustIsAdmin(c) {
 		t.Errorf("Expect isAdmin to be false")
 	}
-
-	tr.assertTripped(true)
 }
 
 func TestROAdmin(t *testing.T) {
@@ -247,16 +246,13 @@ func TestBasicBucket(t *testing.T) {
 
 	c := mustAuthWebCreds(a, req)
 
-	t.Log("http call is lazy. Should not occur yet")
-	tr.assertTripped(false)
+	t.Log("http call is not lazy. Should happen at once")
+	tr.assertTripped(true)
 
 	t.Log("bucket foo access should be allowed")
 	if !mustAccessBucket(c, "foo") {
 		t.Errorf("access is expected to be allowed")
 	}
-
-	t.Log("and that needs http call")
-	tr.assertTripped(true)
 
 	if !mustReadBucket(c, "foo") {
 		t.Errorf("read access is expected to be allowed")
