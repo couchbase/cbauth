@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // TODO: infinite restart babysitting policy
@@ -144,12 +145,28 @@ func extractCreds(req *http.Request) (user string, pwd string, err error) {
 	return
 }
 
+func waitNonStale(c *AuthCache) {
+	for i := 3; i > 0; i-- {
+		var stale bool
+		c.lock.RLock()
+		stale = c.stale
+		c.lock.RUnlock()
+		if !stale {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return
+}
+
 // VerifyCreds is a method that is called by cbauth to verify credentials against cache
 func (c *AuthCache) VerifyCreds(req *http.Request) (user, role string, buckets map[string]bool, err error) {
 	user, pwd, err := extractCreds(req)
 	if err != nil {
 		return
 	}
+
+	waitNonStale(c)
 
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -215,6 +232,8 @@ func (c *AuthCache) GetMemcachedServiceAuth(hostport string) (user, pwd string, 
 	if err != nil {
 		return
 	}
+
+	waitNonStale(c)
 
 	c.lock.RLock()
 	defer c.lock.RUnlock()
