@@ -95,7 +95,14 @@ func StartAuthCache(runRevRPC bool) (cache *AuthCache) {
 		cache: cache,
 	}
 	if runRevRPC {
-		go revrpc.BabysitService(svc.getSetupRPCFun(), nil, nil)
+		go func() {
+			for {
+				revrpc.BabysitService(svc.getSetupRPCFun(), nil, nil)
+				// FIXME: this is cheap way to limit
+				// rate of restarts for now
+				time.Sleep(100 * time.Millisecond)
+			}
+		}()
 	}
 	return
 }
