@@ -9,18 +9,22 @@ import (
 	"github.com/couchbase/cbauth/revrpc"
 )
 
+// HelloMsg is example request type.
 type HelloMsg struct {
 	Name  string
 	Sleep time.Duration
 }
 
+// HelloResponseMsg is example response type.
 type HelloResponseMsg struct {
 	Msg string
 }
 
+// RPC is our example rpc instance.
 type RPC struct{}
 
-func (_ RPC) Hello(req *HelloMsg, res *HelloResponseMsg) error {
+// Hello is example revrpc exported method.
+func (r RPC) Hello(req *HelloMsg, res *HelloResponseMsg) error {
 	log.Printf("Got hello from %s", req.Name)
 	*res = HelloResponseMsg{Msg: "Hello, " + req.Name}
 	time.Sleep(100*time.Millisecond + req.Sleep)
@@ -34,7 +38,7 @@ func rpcSetup(rs *rpc.Server) error {
 	return nil
 }
 
-func MaybeSetEnv(key, value string) {
+func maybeSetEnv(key, value string) {
 	if os.Getenv(key) != "" {
 		return
 	}
@@ -42,8 +46,8 @@ func MaybeSetEnv(key, value string) {
 }
 
 func main() {
-	MaybeSetEnv("NS_SERVER_CBAUTH_RPC_URL", "http://127.0.0.1:9000/rpcdemo")
-	MaybeSetEnv("NS_SERVER_CBAUTH_USER", "Administrator")
-	MaybeSetEnv("NS_SERVER_CBAUTH_PWD", "asdasd")
+	maybeSetEnv("NS_SERVER_CBAUTH_RPC_URL", "http://127.0.0.1:9000/rpcdemo")
+	maybeSetEnv("NS_SERVER_CBAUTH_USER", "Administrator")
+	maybeSetEnv("NS_SERVER_CBAUTH_PWD", "asdasd")
 	log.Fatal(revrpc.BabysitService(rpcSetup, nil, nil))
 }
