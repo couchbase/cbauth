@@ -83,7 +83,7 @@ func doBucketRequestFuller(bucket, baseURL string) (json []byte, err error) {
 
 	defer resp.Body.Close()
 
-	log.Print("Got response %v", resp)
+	log.Print("Got response ", resp)
 
 	if resp.StatusCode != 200 {
 		err = fmt.Errorf("Terse bucket info request failed: %v", resp)
@@ -94,7 +94,7 @@ func doBucketRequestFuller(bucket, baseURL string) (json []byte, err error) {
 	return ioutil.ReadAll(resp.Body)
 }
 
-var bucketRequestClient *http.Client = initBucketClient()
+var bucketRequestClient = initBucketClient()
 
 func initBucketClient() *http.Client {
 	t := cbauth.WrapHTTPTransport(http.DefaultTransport, nil)
@@ -112,7 +112,7 @@ func doBucketRequestSimpler(bucket, baseURL string) (json []byte, err error) {
 
 	defer resp.Body.Close()
 
-	log.Print("Got response %v", resp)
+	log.Print("Got response ", resp)
 
 	if resp.StatusCode != 200 {
 		err = fmt.Errorf("Terse bucket info request failed: %v", resp)
@@ -129,9 +129,8 @@ func performBucketRequest(bucket, baseURL string) (json []byte, err error) {
 	}
 	if useFullerRequestFlag {
 		return doBucketRequestFuller(bucket, baseURL)
-	} else {
-		return doBucketRequestSimpler(bucket, baseURL)
 	}
+	return doBucketRequestSimpler(bucket, baseURL)
 }
 
 func recogniseBucket(req *http.Request) (bucket string) {
