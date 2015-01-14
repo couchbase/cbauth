@@ -72,12 +72,15 @@ func initSockpath() string {
 	return s
 }
 
+// ConnectFn is function used to establish connection to saslauthd.
 type ConnectFn func() (io.ReadWriteCloser, error)
 
 func connect() (io.ReadWriteCloser, error) {
 	return net.Dial("unix", sockPath)
 }
 
+// AuthWithConnect verifies given creds in saslauthd using given
+// connect function to reach it.
 func AuthWithConnect(user, pwd, service, real string, connect ConnectFn) (ok bool, err error) {
 	conn, err := connect()
 	if err != nil {
@@ -93,14 +96,18 @@ func AuthWithConnect(user, pwd, service, real string, connect ConnectFn) (ok boo
 	return
 }
 
+// Auth verifies given creds in saslauthd.
 func Auth(user, pwd, service, real string) (ok bool, err error) {
 	return AuthWithConnect(user, pwd, service, real, connect)
 }
 
+// Supported returns true on all platforms where saslauthd code is
+// supported (which is essentially all but windows).
 func Supported() bool {
 	return true
 }
 
+// Available returns true iff saslauthd socket is reachable.
 func Available() bool {
 	c, _ := connect()
 	if c != nil {
