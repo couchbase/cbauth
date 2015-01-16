@@ -1,29 +1,69 @@
-// @author Couchbase <info@couchbase.com>
-// @copyright 2014 Couchbase, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package cbauth
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
 	"fmt"
-	"github.com/couchbase/cbauth/cache"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/couchbase/cbauth/cbauthimpl"
 )
+
+func newAuth(initPeriod time.Duration) *authImpl {
+	svc := cbauthimpl.NewSVC(initPeriod)
+	return &authImpl{svc}
+}
+
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func hashPassword(password string, salt []byte) []byte {
+	h := hmac.New(sha1.New, salt)
+	h.Write([]byte(password))
+	return h.Sum(nil)
+}
+
+func mkUser(user, password, salt string) (u cbauthimpl.User) {
+	u.User = user
+	u.Salt = []byte(salt)
+	u.Mac = hashPassword(password, u.Salt)
+	return
+}
+
+func newAuthForTest(body func(freshChan chan struct{}, timeoutBody func())) *authImpl {
+	testDur := 555 * time.Hour
+
+	wf := func(period time.Duration, ch chan struct{}, timeoutBody func()) {
+		if period != testDur {
+			panic(period)
+		}
+		body(ch, timeoutBody)
+	}
+
+	return &authImpl{cbauthimpl.NewSVCForTest(testDur, wf)}
+}
+
+func acc(ok bool, err error) bool {
+	must(err)
+	return ok
+}
+
+func assertAdmins(t *testing.T, c Creds, needAdmin, needROAdmin bool) {
+	if acc(c.IsAdmin()) != needAdmin {
+		t.Fatalf("admin access must be: %v", needAdmin)
+	}
+	if acc(c.IsROAdmin()) != needROAdmin {
+		t.Fatalf("ro-admin access must be: %v", needROAdmin)
+	}
+}
 
 type testingRoundTripper struct {
 	method  string
@@ -38,12 +78,6 @@ func newTestingRT(method, uri string) *testingRoundTripper {
 	return &testingRoundTripper{
 		method: method,
 		url:    uri,
-	}
-}
-
-func assertNoError(err error) {
-	if err != nil {
-		log.Fatal(err)
 	}
 }
 
@@ -99,9 +133,9 @@ func (rt *testingRoundTripper) resetTripped() {
 	rt.tripped = false
 }
 
-func (rt *testingRoundTripper) assertTripped(expected bool) {
+func (rt *testingRoundTripper) assertTripped(t *testing.T, expected bool) {
 	if rt.tripped != expected {
-		log.Fatalf("Tripped is not expected. Have: %v, need: %v", rt.tripped, expected)
+		t.Fatalf("Tripped is not expected. Have: %v, need: %v", rt.tripped, expected)
 	}
 }
 
@@ -111,173 +145,202 @@ func (rt *testingRoundTripper) setTokenAuth(user, token, role string) {
 	rt.role = role
 }
 
-func mustAccessBucket(c Creds, bucket string) bool {
-	rv, err := c.CanAccessBucket(bucket)
-	assertNoError(err)
-	return rv
-}
-
-func mustReadBucket(c Creds, bucket string) bool {
-	rv, err := c.CanReadBucket(bucket)
-	assertNoError(err)
-	return rv
-}
-
-func mustIsAdmin(c Creds) bool {
-	rv, err := c.IsAdmin()
-	assertNoError(err)
-	return rv
-}
-
-func mustIsROAdmin(c Creds) bool {
-	rv, err := c.IsROAdmin()
-	assertNoError(err)
-	return rv
-}
-
-func mustAuthWebCreds(a Authenticator, req *http.Request) Creds {
-	c, err := a.AuthWebCreds(req)
-	assertNoError(err)
-	return c
-}
-
-func updateCache(a *httpAuthenticator, authCache *cache.Cache) {
-	ok := false
-	err := a.cache.UpdateCache(authCache, &ok)
-	assertNoError(err)
-	if !ok {
-		log.Fatal("Unsuccessfull cache update")
+func TestStaleBasic(t *testing.T) {
+	for _, period := range []time.Duration{1, 0} {
+		a := newAuth(period)
+		_, err := a.Auth("asd", "bsd")
+		if err != ErrStale {
+			t.Fatalf("For period: %v expect ErrStale in stale state. Got %v", period, err)
+		}
 	}
 }
 
-var salt = []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0}
+func TestStale(t *testing.T) {
+	sync1 := make(chan bool)
+	sync2 := make(chan bool)
 
-func TestBasicAdmin(t *testing.T) {
-	url := "http://127.0.0.1:9000/_auth"
+	go func() {
+		sync1 <- true
+		sync2 <- true
+		close(sync2)
+	}()
 
-	tr := newTestingRT("POST", url)
-	a := newHTTPAuthenticator(url, tr, false)
+	a := newAuthForTest(func(ch chan struct{}, timeoutBody func()) {
+		<-sync1
+		go func() {
+			<-sync2
+			timeoutBody()
+		}()
+	})
 
-	authCache := cache.NewTestCache()
-	authCache.SetUser("Administrator", "asdasd", "admin", salt)
-	updateCache(a, authCache)
-
-	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
-	assertNoError(err)
-	req.SetBasicAuth("Administrator", "asdasd")
-
-	c := mustAuthWebCreds(a, req)
-
-	if !mustIsAdmin(c) {
-		t.Errorf("Expect isAdmin to be true")
+	_, err := a.Auth("a", "b")
+	if err != ErrStale {
+		t.Fatalf("Expect ErrStale in stale state. Got %v", err)
 	}
 
-	if !mustIsROAdmin(c) {
-		t.Errorf("Expect isROAdmin to be true")
+	if _, ok := <-sync2; ok {
+		t.Fatal("Some bad sync")
 	}
 
-	if c.Name() != "Administrator" {
-		t.Errorf("Expect name to be Administrator")
+}
+
+func doTestStaleThenAdmin(t *testing.T, updateBeforeTimer bool) {
+	timerchan := make(chan bool)
+	var freshChan chan struct{}
+	a := newAuthForTest(func(ch chan struct{}, timeoutBody func()) {
+		freshChan = ch
+		go func() {
+			<-timerchan
+			timeoutBody()
+		}()
+	})
+
+	updatechan := make(chan bool)
+	go func() {
+		c := cbauthimpl.Cache{Admin: mkUser("admin", "asdasd", "nacl")}
+		<-updatechan
+		must(a.svc.UpdateDB(&c, nil))
+		<-updatechan
+	}()
+
+	go func() {
+		freshChan <- struct{}{}
+		if !updateBeforeTimer {
+			close(timerchan)
+			return
+		}
+
+		updatechan <- true
+		updatechan <- true
+		close(timerchan)
+	}()
+
+	cred, err := a.Auth("admin", "asdasd")
+	if updateBeforeTimer {
+		must(err)
+		if ok, _ := cred.IsAdmin(); !ok {
+			t.Fatal("user admin must be recognised as admin")
+		}
+	} else {
+		if err != ErrStale {
+			t.Fatal("db must be stale")
+		}
+		updatechan <- true
+		updatechan <- true
 	}
 
-	accessBucket := mustAccessBucket(c, "asdasdasdasd") && mustAccessBucket(c, "ffee")
-	if !accessBucket {
-		t.Errorf("Expected to be able to access all buckets")
+	if _, ok := <-timerchan; ok {
+		t.Fatal("timerchan must be closed")
 	}
 
-	tr.assertTripped(false)
-	req.SetBasicAuth("Administrator", "qwerty")
-
-	c = mustAuthWebCreds(a, req)
-
-	if mustIsAdmin(c) {
-		t.Errorf("Expect isAdmin to be false")
+	cred, err = a.Auth("admin", "badpass")
+	if err != nil || cred != NoAccessCreds {
+		t.Fatalf("badpass must not work. Instead got: %v and %v", cred, err)
 	}
 
-	authCache.SetUser("Administrator", "qwerty", "admin", salt)
-	updateCache(a, authCache)
-
-	c = mustAuthWebCreds(a, req)
-
-	if !mustIsAdmin(c) {
-		t.Errorf("Expect isAdmin to be true")
+	cred, err = a.Auth("admin", "asdasd")
+	must(err)
+	if ok, _ := cred.IsAdmin(); !ok {
+		t.Fatal("user admin must be recognised as admin")
 	}
 }
 
-func TestROAdmin(t *testing.T) {
-	url := "http://127.0.0.1:9000/_auth"
+func TestStaleThenAdminTimerCase(t *testing.T) {
+	doTestStaleThenAdmin(t, false)
+}
 
-	tr := newTestingRT("POST", url)
-	a := newHTTPAuthenticator(url, tr, false)
+func TestStaleThenAdminUpdateCase(t *testing.T) {
+	doTestStaleThenAdmin(t, true)
+}
 
-	authCache := cache.NewTestCache()
-	authCache.SetUser("roadmin", "asdasd", "ro_admin", salt)
-	updateCache(a, authCache)
+func TestBucketsAuth(t *testing.T) {
+	a := newAuth(0)
+	must(a.svc.UpdateDB(&cbauthimpl.Cache{Buckets: map[string]string{"default": "", "foo": "bar"}}, nil))
+	c, err := a.Auth("foo", "bar")
+	must(err)
+	if !acc(c.CanAccessBucket("foo")) {
+		t.Fatal("Expect foo access with right pw to work")
+	}
+	if acc(c.CanAccessBucket("default")) {
+		t.Fatal("Expect default access to not work when authed towards foo")
+	}
+	if acc(c.CanAccessBucket("unknown")) {
+		t.Fatal("Expect unknown bucket access to not work")
+	}
+	assertAdmins(t, c, false, false)
 
-	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
-	assertNoError(err)
-	req.SetBasicAuth("roadmin", "asdasd")
-
-	c := mustAuthWebCreds(a, req)
-
-	if mustIsAdmin(c) {
-		t.Errorf("Expect isAdmin to be false")
+	c, err = a.Auth("foo", "notbar")
+	if err != nil || c != NoAccessCreds {
+		t.Fatalf("Expect wrong password auth to fail. Got: %v and %v", c, err)
 	}
 
-	if !mustIsROAdmin(c) {
-		t.Errorf("Expect isROAdmin to be true")
+	c, err = a.Auth("", "")
+	must(err)
+	assertAdmins(t, c, false, false)
+	if acc(c.CanAccessBucket("foo")) {
+		t.Fatal("Expect foo access to not work under anon auth")
+	}
+	if !acc(c.CanAccessBucket("default")) {
+		t.Fatal("Expect default access to work under anon auth")
 	}
 
-	if mustReadBucket(c, "default") || mustReadBucket(c, "asdsad") {
-		t.Errorf("Expect all read access to buckets to be forbidden")
+	// now somebody deletes no-password default bucket
+	must(a.svc.UpdateDB(&cbauthimpl.Cache{Buckets: map[string]string{"foo": "bar"}}, nil))
+	c, err = a.Auth("foo", "bar")
+	must(err)
+	assertAdmins(t, c, false, false)
+	if !acc(c.CanAccessBucket("foo")) {
+		t.Fatal("Expect foo access to work under right pw")
 	}
-
-	if mustAccessBucket(c, "default") || mustAccessBucket(c, "foorbar") {
-		t.Errorf("Expect bucket access to be forbidden")
+	// and no password access should not work
+	c, err = a.Auth("", "")
+	if err != nil || c != NoAccessCreds {
+		t.Fatalf("Expect no password access to fail after deletion of default bucket. Got: %v and %v", c, err)
 	}
 }
 
-func TestBasicBucket(t *testing.T) {
-	url := "http://127.0.0.1:9000/_auth"
+func mkNode(host, user, pwd string, ports []int, local bool) (rv cbauthimpl.Node) {
+	rv.Host = host
+	rv.User = user
+	rv.Password = pwd
+	rv.Ports = ports
+	rv.Local = local
+	return
+}
 
-	tr := newTestingRT("POST", url)
-	a := newHTTPAuthenticator(url, tr, false)
-
-	authCache := cache.NewTestCache()
-	authCache.AddBucket("foo", "asdasd")
-	updateCache(a, authCache)
-
-	req, err := http.NewRequest("GET", "http://q:11234/foo/_query", nil)
-	assertNoError(err)
-	req.SetBasicAuth("foo", "asdasd")
-
-	c := mustAuthWebCreds(a, req)
-
-	tr.assertTripped(false)
-
-	t.Log("bucket foo access should be allowed")
-	if !mustAccessBucket(c, "foo") {
-		t.Errorf("access is expected to be allowed")
+func TestServicePwd(t *testing.T) {
+	a := newAuth(0)
+	c := cbauthimpl.Cache{
+		Nodes: append(cbauthimpl.Cache{}.Nodes,
+			mkNode("beta.local", "_admin", "foobar", []int{9000, 12000}, false),
+			mkNode("chi.local", "_admin", "barfoo", []int{9001, 12001}, false)),
 	}
 
-	if !mustReadBucket(c, "foo") {
-		t.Errorf("read access is expected to be allowed")
+	must(a.svc.UpdateDB(&c, nil))
+	u, p, err := a.GetMemcachedServiceAuth("unknown:9000")
+	if _, ok := err.(UnknownHostPortError); u != "" || p != "" || !ok {
+		t.Fatal("Expect error trying to get auth for unknown service")
+	}
+	u, p, _ = a.GetMemcachedServiceAuth("beta.local:9000")
+	if u != "_admin" || p != "foobar" {
+		t.Fatalf("Expect valid creds for beta.local:9000. Got: %s:%s", u, p)
+	}
+	u, p, _ = a.GetMemcachedServiceAuth("chi.local:12001")
+	if u != "_admin" || p != "barfoo" {
+		t.Fatalf("Expect valid creds for chi.local:12001. Got: %s:%s", u, p)
 	}
 
-	if mustIsAdmin(c) {
-		t.Errorf("Expect isAdmin to be false")
+	u, p, _ = a.GetHTTPServiceAuth("chi.local:9001")
+	if u != "@" || p != "barfoo" {
+		t.Fatalf("Expect valid http creds for chi.local:9001. Got: %s:%s", u, p)
 	}
+}
 
-	if mustIsROAdmin(c) {
-		t.Errorf("Expect isROAdmin to be false")
-	}
-
-	if mustAccessBucket(c, "foo1") {
-		t.Errorf("access to wrong bucket")
-	}
-
-	if mustReadBucket(c, "foo1") {
-		t.Errorf("read access to wrong bucket")
+func overrideDefClient(c *http.Client) func() {
+	var old *http.Client
+	old, http.DefaultClient = http.DefaultClient, c
+	return func() {
+		http.DefaultClient = old
 	}
 }
 
@@ -286,25 +349,31 @@ func TestTokenAdmin(t *testing.T) {
 
 	tr := newTestingRT("POST", url)
 	tr.setTokenAuth("Administrator", "1234567890", "admin")
-	a := newHTTPAuthenticator(url, tr, false)
+
+	defer overrideDefClient(&http.Client{Transport: tr})()
+
+	a := newAuth(0)
+	must(a.svc.UpdateDB(&cbauthimpl.Cache{TokenCheckURL: url}, nil))
 
 	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
-	assertNoError(err)
+	must(err)
 	req.Header.Set("Cookie", "ui-auth-q=1234567890")
 	req.Header.Set("ns_server-ui", "yes")
 
-	c := mustAuthWebCreds(a, req)
+	c, err := a.AuthWebCreds(req)
+	must(err)
+	tr.assertTripped(t, true)
 
-	if !mustIsAdmin(c) {
-		t.Errorf("Expect isAdmin to be true")
-	}
+	assertAdmins(t, c, true, false)
 
 	if c.Name() != "Administrator" {
 		t.Errorf("Expect name to be Administrator")
 	}
 
-	accessBucket := mustAccessBucket(c, "asdasdasdasd") && mustAccessBucket(c, "ffee")
-	if !accessBucket {
-		t.Errorf("Expected to be able to access all buckets")
+	if !acc(c.CanAccessBucket("asdasdasdasd")) {
+		t.Errorf("Expected to be able to access all buckets. Failed at asdasdasdasd")
+	}
+	if !acc(c.CanAccessBucket("ffee")) {
+		t.Errorf("Expected to be able to access all buckets. Failed at ffee")
 	}
 }

@@ -17,8 +17,13 @@ package cbauth
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
-	"os"
+	"net/rpc"
+	"time"
+
+	"github.com/couchbase/cbauth/cbauthimpl"
+	"github.com/couchbase/cbauth/revrpc"
 )
 
 // Default variable holds default authenticator. Default authenticator
@@ -27,11 +32,33 @@ import (
 // ns_server.
 var Default Authenticator
 
+func startDefault(rpcsvc *revrpc.Service) {
+	svc := cbauthimpl.NewSVC(5 * time.Second)
+	Default = &authImpl{svc}
+	go func() {
+		defPolicy := revrpc.DefaultBabysitErrorPolicy.New()
+		// error restart policy that we're going to use simply
+		// resets service before delegating to default restart
+		// policy. That way we always mark service as stale
+		// right after some error occurred.
+		cbauthPolicy := func(err error) error {
+			cbauthimpl.ResetSvc(svc)
+			return defPolicy(err)
+		}
+		err := revrpc.BabysitService(func(s *rpc.Server) error {
+			return s.RegisterName("AuthCacheSvc", svc)
+		}, rpcsvc, revrpc.FnBabysitErrorPolicy(cbauthPolicy))
+		panic(err)
+	}()
+}
+
 func init() {
-	authURL := os.Getenv("NS_SERVER_CBAUTH_URL")
-	if authURL != "" {
-		Default = NewDefaultAuthenticator(authURL, nil)
+	rpcsvc, err := revrpc.GetDefaultServiceFromEnv("cbauth")
+	if err != nil {
+		ErrNotInitialized = fmt.Errorf("Unable to initialize cbauth's revrpc: %s", err)
+		return
 	}
+	startDefault(rpcsvc)
 }
 
 // ErrNotInitialized is used to signal that ns_server environment
