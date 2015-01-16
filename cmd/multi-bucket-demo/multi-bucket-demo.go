@@ -21,9 +21,8 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		flag.PrintDefaults()
-		fmt.Fprintln(os.Stderr, "\nNOTE: that this program requires correctly set cbauth env variables.")
-		fmt.Fprintf(os.Stderr, "E.g: NS_SERVER_CBAUTH_URL=http://127.0.0.1:9000/_cbauth \\\n"+
-			" NS_SERVER_CBAUTH_USER=Administrator NS_SERVER_CBAUTH_PWD=asdasd \\\n"+
+		fmt.Fprintln(os.Stderr, "\nNOTE: that this program requires correctly set cbauth env variable.")
+		fmt.Fprintf(os.Stderr, "E.g: CBAUTH_REVRPC_URL='http://Administrator:asdasd@127.0.0.1:9000/cbauth-demo' \\\n"+
 			"%s --serverURL=http://10.17.3.172:9000 --bucketName=bucket-foo\n\n", os.Args[0])
 	}
 	flag.Parse()
