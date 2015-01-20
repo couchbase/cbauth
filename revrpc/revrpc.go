@@ -198,7 +198,8 @@ type BabysitErrorPolicy interface {
 // BabysitErrorPolicy.
 type DefaultErrorPolicy struct {
 	// RestartsToExit determines how many restarts this error
-	// policy will do before giving up.
+	// policy will do before giving up. Negative value means
+	// restart infinitely.
 	RestartsToExit int
 	// SleepBetweenRestarts specifies duration to sleep between
 	// restarts.
@@ -214,23 +215,21 @@ type DefaultErrorPolicy struct {
 // used by default. It's initial value is "suitably configured"
 // DefaultErrorPolicy instance.
 var DefaultBabysitErrorPolicy BabysitErrorPolicy = DefaultErrorPolicy{
-	RestartsToExit:       16,
+	RestartsToExit:       -1,
 	SleepBetweenRestarts: time.Second,
 	LogPrint:             log.Print,
 }
 
 func (p *DefaultErrorPolicy) try(err error) error {
-	if err == ErrCBAuthServiceUnconfigured {
-		p.LogPrint(fmt.Sprintf("RevRpc connection was not started: %s.", err))
-		return err
-	}
-	p.restartsLeft--
-	if p.restartsLeft <= 0 {
-		if err == nil {
-			err = errors.New("Retries exceeded")
+	if p.RestartsToExit >= 0 {
+		p.restartsLeft--
+		if p.restartsLeft <= 0 {
+			if err == nil {
+				err = errors.New("Retries exceeded")
+			}
+			p.LogPrint("Will not retry on error: ", err)
+			return err
 		}
-		p.LogPrint("Will not retry on error: ", err)
-		return err
 	}
 
 	p.LogPrint(fmt.Sprintf("Got error (%s) and will retry in %s", err, p.SleepBetweenRestarts))
