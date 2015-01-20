@@ -247,6 +247,10 @@ func BabysitService(setupBody ServiceSetupCallback, svc *Service, errorPolicy Ba
 }
 
 func doGetServiceFromEnv(serviceName string) (*Service, error) {
+	if rurl := os.Getenv("CBAUTH_REVRPC_URL"); rurl != "" {
+		return NewService(rurl)
+	}
+
 	surl := os.Getenv("NS_SERVER_CBAUTH_RPC_URL")
 	user := os.Getenv("NS_SERVER_CBAUTH_USER")
 	pwd := os.Getenv("NS_SERVER_CBAUTH_PWD")
