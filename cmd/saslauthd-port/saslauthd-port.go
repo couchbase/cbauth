@@ -63,8 +63,12 @@ func runStdinWatcher() {
 }
 
 func doRunPort() error {
+	svc, err := revrpc.GetDefaultServiceFromEnv("saslauthd-port")
+	if err != nil {
+		return err
+	}
 	go runStdinWatcher()
-	return revrpc.BabysitService(setupPortRPC, nil, nil)
+	return revrpc.BabysitService(setupPortRPC, svc, nil)
 }
 
 func main() {

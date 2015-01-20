@@ -46,45 +46,49 @@ type serviceImpl interface {
 
 // Service type represents specific configured instance of revrpc.
 type Service struct {
-	serviceImpl
-}
-
-// Run method connects to ns_server, sets up json rpc instance and
-// handles rpc requests loop until connection is alive. Returned error
-// is always non-nil. In case connection was closed by ns_server
-// io.EOF is returned.
-func (s *Service) Run(setupBody ServiceSetupCallback) error {
-	return s.serviceImpl.Run(setupBody)
-}
-
-// ErrAlreadyRunning is returned from Run method to indicate that
-// given Service instance is already running.
-var ErrAlreadyRunning = errors.New("service is already running")
-
-type defaultServiceImpl struct {
 	running int32
 	user    string
 	pwd     string
 	url     *url.URL
 }
 
-// NewDefaultService creates and returns Service instance that
-// connects to given ns_server url using given credentials. Returns
-// error if url is malformed. Does not actually connect to ns_server,
-// so it will succeed even if ns_server is not running or if creds are
-// not valid admin creds.
-func NewDefaultService(user, pwd, connectURL string) (*Service, error) {
+// ErrAlreadyRunning is returned from Run method to indicate that
+// given Service instance is already running.
+var ErrAlreadyRunning = errors.New("service is already running")
+
+// NewService creates and returns Service instance that connects to
+// given ns_server url (which is expected to have creds
+// encoded). Returns error if url is malformed. Does not actually
+// connect to ns_server, so it will succeed even if ns_server is not
+// running or if creds are not valid admin creds.
+func NewService(connectURL string) (*Service, error) {
 	u, err := url.Parse(connectURL)
 	if err != nil {
 		// TODO: nicer error maybe
 		return nil, err
 	}
-	impl := &defaultServiceImpl{
+	user := ""
+	pwd := ""
+	if ui := u.User; ui != nil {
+		user = ui.Username()
+		pwd, _ = ui.Password()
+	}
+
+	return &Service{
 		user: user,
 		pwd:  pwd,
 		url:  u,
+	}, nil
+}
+
+// MustService is like NewService except that it panics on
+// errors. I.e. it is useful in cases where errors are not expected.
+func MustService(connectURL string) *Service {
+	rv, err := NewService(connectURL)
+	if err != nil {
+		panic(err)
 	}
-	return &Service{impl}, nil
+	return rv
 }
 
 type minirwc struct {
@@ -96,8 +100,11 @@ func (r *minirwc) Read(buf []byte) (n int, err error) {
 	return r.bufreader.Read(buf)
 }
 
-func (s *defaultServiceImpl) Run(setupBody ServiceSetupCallback) error {
-	// TODO: consider nicer errors. Maybe via net.OpError
+// Run method connects to ns_server, sets up json rpc instance and
+// handles rpc requests loop until connection is alive. Returned error
+// is always non-nil. In case connection was closed by ns_server
+// io.EOF is returned.
+func (s *Service) Run(setupBody ServiceSetupCallback) error {
 	if !atomic.CompareAndSwapInt32(&s.running, 0, 1) {
 		return ErrAlreadyRunning
 	}
@@ -139,44 +146,6 @@ func (s *defaultServiceImpl) Run(setupBody ServiceSetupCallback) error {
 	rpcServer.ServeCodec(codec)
 
 	return io.EOF
-}
-
-// ErrCBAuthServiceUnconfigured error is returned from Run method of
-// Service returned by GetServiceFromEnv() if needed environment are
-// not set.
-var ErrCBAuthServiceUnconfigured = errors.New("cbauth service configuration environment variables not set")
-
-var cbauthServiceOnce sync.Once
-var cbauthService *Service
-var cbauthServiceErr error
-
-type errServiceImpl struct{ error }
-
-func (e errServiceImpl) Run(setupBody ServiceSetupCallback) error {
-	return e.error
-}
-
-// GetServiceFromEnv returns service instance that is configured from
-// environment variables that are typically set by ns_server. This is
-// default way to obtain Service instance for Couchbase golang
-// services.
-func GetServiceFromEnv() *Service {
-	cbauthServiceOnce.Do(func() {
-		connectURL := os.Getenv("NS_SERVER_CBAUTH_RPC_URL")
-		authU := os.Getenv("NS_SERVER_CBAUTH_USER")
-		authP := os.Getenv("NS_SERVER_CBAUTH_PWD")
-		if connectURL == "" {
-			cbauthServiceErr = ErrCBAuthServiceUnconfigured
-			return
-		}
-		cbauthService, cbauthServiceErr = NewDefaultService(authU, authP, connectURL)
-	})
-
-	if cbauthService != nil {
-		return cbauthService
-	}
-
-	return &Service{errServiceImpl{cbauthServiceErr}}
 }
 
 // ErrorPolicyFn function is used to make error handling decision in
@@ -232,7 +201,7 @@ func (p *DefaultErrorPolicy) try(err error) error {
 		}
 	}
 
-	p.LogPrint(fmt.Sprintf("Got error (%s) and will retry in %s", err, p.SleepBetweenRestarts))
+	p.LogPrint(fmt.Sprintf("revrpc: Got error (%s) and will retry in %s", err, p.SleepBetweenRestarts))
 	time.Sleep(p.SleepBetweenRestarts)
 
 	return nil
@@ -260,16 +229,11 @@ func (p FnBabysitErrorPolicy) New() ErrorPolicyFn {
 // NoRestartsBabysitErrorPolicy is error policy that always forbids restarts.
 var NoRestartsBabysitErrorPolicy BabysitErrorPolicy = FnBabysitErrorPolicy(func(err error) error { return err })
 
-// BabysitService function runs given service instance, restarting
-// it as needed if allowed by given BabysitErrorPolicy. nil can be
-// passed as Service instance, in which case Service from
-// GetServiceFromEnv() function is used. Similarly, nil can be passed
-// to errorPolicy argument, in which case value of
+// BabysitService function runs given service instance, restarting it
+// as needed if allowed by given BabysitErrorPolicy. nil
+// can be passed to errorPolicy argument, in which case value of
 // DefaultBabysitErrorPolicy is used.
 func BabysitService(setupBody ServiceSetupCallback, svc *Service, errorPolicy BabysitErrorPolicy) error {
-	if svc == nil {
-		svc = GetServiceFromEnv()
-	}
 	if errorPolicy == nil {
 		errorPolicy = DefaultBabysitErrorPolicy
 	}
@@ -280,4 +244,46 @@ func BabysitService(setupBody ServiceSetupCallback, svc *Service, errorPolicy Ba
 			return err
 		}
 	}
+}
+
+func doGetServiceFromEnv(serviceName string) (*Service, error) {
+	surl := os.Getenv("NS_SERVER_CBAUTH_RPC_URL")
+	user := os.Getenv("NS_SERVER_CBAUTH_USER")
+	pwd := os.Getenv("NS_SERVER_CBAUTH_PWD")
+	if surl == "" || user == "" || pwd == "" {
+		return nil, fmt.Errorf("Some cbauth environment variables are not set. I.e.: (rpc-url: `%s', user: `%s', pwd: `%s')", surl, user, pwd)
+	}
+	u, err := url.Parse(surl)
+	if err != nil {
+		return nil, fmt.Errorf("cbauth environment variable NS_SERVER_CBAUTH_RPC_URL is malformed. Parsing it failed with: %s", err)
+	}
+	u.User = url.UserPassword(user, pwd)
+	u.Path = u.Path + "-" + serviceName
+	surl = u.String()
+
+	// parsing url cannot fail due to way it was constructed.
+	return MustService(surl), nil
+}
+
+var defaultsGot = make(map[string]bool)
+var defaultsGotL sync.Mutex
+
+// GetDefaultServiceFromEnv returns Service instance that connects to
+// ns_server according to CBAUTH_REVRPC_URL environment variable (or
+// backwards compat variables NS_SERVER_CBAUTH_{RPC_URL,USER,PWD}
+// ). serviceName should be unique name of your revrpc service. cbauth
+// itself is using serviceName = "cbauth". Trying to obtain same
+// service twice will return error. I.e. you're supposed to get your
+// Service instance once and only once and hold it forever.
+func GetDefaultServiceFromEnv(serviceName string) (*Service, error) {
+	defaultsGotL.Lock()
+	defer defaultsGotL.Unlock()
+	if defaultsGot[serviceName] {
+		return nil, fmt.Errorf("Service `%s' was already obtained (and presumably started)", serviceName)
+	}
+	svc, err := doGetServiceFromEnv(serviceName)
+	if err == nil {
+		defaultsGot[serviceName] = true
+	}
+	return svc, err
 }

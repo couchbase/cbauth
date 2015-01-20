@@ -45,9 +45,17 @@ func maybeSetEnv(key, value string) {
 	os.Setenv(key, value)
 }
 
+func doRun() error {
+	svc, err := revrpc.GetDefaultServiceFromEnv("demo")
+	if err != nil {
+		return err
+	}
+	return revrpc.BabysitService(rpcSetup, svc, nil)
+}
+
 func main() {
 	maybeSetEnv("NS_SERVER_CBAUTH_RPC_URL", "http://127.0.0.1:9000/rpcdemo")
 	maybeSetEnv("NS_SERVER_CBAUTH_USER", "Administrator")
 	maybeSetEnv("NS_SERVER_CBAUTH_PWD", "asdasd")
-	log.Fatal(revrpc.BabysitService(rpcSetup, nil, nil))
+	log.Fatal(doRun())
 }

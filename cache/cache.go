@@ -22,6 +22,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"github.com/couchbase/cbauth/revrpc"
+	"log"
 	"net/http"
 	"net/rpc"
 	"strconv"
@@ -29,8 +30,6 @@ import (
 	"sync"
 	"time"
 )
-
-// TODO: infinite restart babysitting policy
 
 // TODO: do several retries in case of stale cache
 
@@ -85,6 +84,15 @@ func (c *AuthCache) UpdateCache(req *Cache, ok *bool) (err error) {
 	return
 }
 
+func doStartRPC(cacheSvc *AuthCacheSvc) {
+	svc, err := revrpc.GetDefaultServiceFromEnv("cbauth")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	log.Fatal(revrpc.BabysitService(cacheSvc.getSetupRPCFun(), svc, nil))
+}
+
 // StartAuthCache creates AuthCache and possibly starts revrpc service
 func StartAuthCache(runRevRPC bool) (cache *AuthCache) {
 	cache = &AuthCache{
@@ -95,14 +103,7 @@ func StartAuthCache(runRevRPC bool) (cache *AuthCache) {
 		cache: cache,
 	}
 	if runRevRPC {
-		go func() {
-			for {
-				revrpc.BabysitService(svc.getSetupRPCFun(), nil, nil)
-				// FIXME: this is cheap way to limit
-				// rate of restarts for now
-				time.Sleep(100 * time.Millisecond)
-			}
-		}()
+		go doStartRPC(svc)
 	}
 	return
 }
