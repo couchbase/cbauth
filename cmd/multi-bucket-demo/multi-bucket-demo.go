@@ -27,16 +27,6 @@ func main() {
 	}
 	flag.Parse()
 
-	// this will give go-couchbase unlimited access to all http
-	// endpoints it has access to.
-	//
-	// NOTE: it's kinda hackish. And note that it _will override_
-	// whatever auth is given at client instantiation. In this
-	// program there is _no auth_ that is given anywhere as auth
-	// is supposed to come from cbauth.
-	transport := cbauth.WrapHTTPTransport(couchbase.HTTPTransport, nil)
-	couchbase.HTTPClient.Transport = transport
-
 	client, err := couchbase.ConnectWithAuth(*serverURL, cbauth.NewAuthHandler(nil))
 	if err != nil {
 		log.Fatal(err)

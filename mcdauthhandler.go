@@ -16,36 +16,56 @@
 package cbauth
 
 import (
+	"net/http"
+
 	"github.com/couchbase/gomemcached/client"
 	couchbase "github.com/couchbaselabs/go-couchbase"
 )
 
-type authHandler struct {
-	bucket string
-	a      Authenticator
+// AuthHandler is a type that implements go-couchbase AuthHandler,
+// GenericMcdAuthHandler and HTTPAuthHandler interfaces. It integrate
+// cbauth into go-couchbase.
+type AuthHandler struct {
+	Bucket string
+	A      Authenticator
 }
 
-var _ couchbase.MultiBucketAuthHandler = (*authHandler)(nil)
+var _ couchbase.MultiBucketAuthHandler = (*AuthHandler)(nil)
+var _ couchbase.HTTPAuthHandler = (*AuthHandler)(nil)
 
-func (ah *authHandler) GetCredentials() (string, string, string) {
-	return "", "", ah.bucket
+// GetCredentials method returns empty creds (it is not supposed to be
+// used in practice).
+func (ah *AuthHandler) GetCredentials() (string, string, string) {
+	return "", "", ah.Bucket
 }
 
-func (ah *authHandler) ForBucket(bucket string) couchbase.AuthHandler {
+// ForBucket method returns copy of AuthHandler that is configured for
+// different bucket.
+func (ah *AuthHandler) ForBucket(bucket string) couchbase.AuthHandler {
 	copy := *ah
-	copy.bucket = bucket
+	copy.Bucket = bucket
 	return &copy
 }
 
-func (ah *authHandler) AuthenticateMemcachedConn(host string, conn *memcached.Client) error {
-	return WithAuthenticator(ah.a, func(a Authenticator) error {
+// SetCredsForRequest calls SetRequestAuthVia on given request and
+// authhandler's Authenticator.
+func (ah *AuthHandler) SetCredsForRequest(req *http.Request) error {
+	return SetRequestAuthVia(req, ah.A)
+}
+
+// AuthenticateMemcachedConn method grabs creds for given host
+// destination and performs auth and select-bucket on given
+// memcached.Client. It is called by go-couchbase as part of setting
+// up fresh connection in its memcached connections pool.
+func (ah *AuthHandler) AuthenticateMemcachedConn(host string, conn *memcached.Client) error {
+	return WithAuthenticator(ah.A, func(a Authenticator) error {
 		u, p, err := a.GetMemcachedServiceAuth(host)
 		if err != nil {
 			return err
 		}
 		_, err = conn.Auth(u, p)
-		if err == nil && ah.bucket != "" {
-			_, err = conn.SelectBucket(ah.bucket)
+		if err == nil && ah.Bucket != "" {
+			_, err = conn.SelectBucket(ah.Bucket)
 		}
 		return err
 	})
@@ -55,6 +75,6 @@ func (ah *authHandler) AuthenticateMemcachedConn(host string, conn *memcached.Cl
 // authenticator instance to authenticate memcached connections for
 // go-couchbase client. If given authenticator is nil, Default
 // authenticator will be used during AuthenticateMemcachedConn calls.
-func NewAuthHandler(a Authenticator) couchbase.GenericMcdAuthHandler {
-	return &authHandler{a: a}
+func NewAuthHandler(a Authenticator) *AuthHandler {
+	return &AuthHandler{A: a}
 }
