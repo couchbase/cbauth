@@ -20,6 +20,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/rpc"
+	"net/url"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/couchbase/cbauth/cbauthimpl"
@@ -59,6 +62,32 @@ func init() {
 		return
 	}
 	startDefault(rpcsvc)
+}
+
+// InternalRetryDefaultInit can be used by golang services that are
+// willing to perform manual initialization of cbauth (i.e. for easier
+// testing). This API is subject to change and should be used only if
+// really needed. Returns false if Default Authenticator was already
+// initialized.
+func InternalRetryDefaultInit(mgmtHostPort, user, password string) (bool, error) {
+	if Default != nil {
+		return false, nil
+	}
+	serviceName := filepath.Base(os.Args[0]) + "-cbauth"
+	host, port, err := SplitHostPort(mgmtHostPort)
+	if err != nil {
+		return false, nil
+	}
+	baseurl := fmt.Sprintf("http://%s:%d/%s", host, port, serviceName)
+	u, err := url.Parse(baseurl)
+	if err != nil {
+		return false, fmt.Errorf("Failed to parse constructed url `%s': %s", baseurl, err)
+	}
+	u.User = url.UserPassword(user, password)
+
+	startDefault(revrpc.MustService(u.String()))
+
+	return true, nil
 }
 
 // ErrNotInitialized is used to signal that ns_server environment

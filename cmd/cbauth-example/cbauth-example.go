@@ -27,16 +27,19 @@ import (
 
 	"errors"
 	"github.com/couchbase/cbauth"
+	"net/url"
 )
 
 var mgmtURLFlag string
 var listenFlag string
 var useFullerRequestFlag bool
+var authFlag string
 
 func initFlags() {
 	flag.StringVar(&mgmtURLFlag, "mgmtURL", "", "base url of mgmt service (e.g. http://lh:8091/)")
 	flag.StringVar(&listenFlag, "listen", "", "listen endpoint (e.g. :8080)")
 	flag.BoolVar(&useFullerRequestFlag, "use-fuller-request", false, "")
+	flag.StringVar(&authFlag, "auth", "", "user:password to use to initialize cbauth")
 	flag.Parse()
 }
 
@@ -241,6 +244,22 @@ func servingWithError(body errHandler) nonErrHandler {
 	}
 }
 
+func maybeReinitCBAuth() {
+	if authFlag == "" {
+		return
+	}
+	up := strings.Split(authFlag, ":")
+	authU, authP := up[0], up[1]
+	u, err := url.Parse(mgmtURLFlag)
+	if err != nil {
+		log.Fatal("Failed to parse mgmtURLFlag: ", err)
+	}
+	_, err = cbauth.InternalRetryDefaultInit(u.Host, authU, authP)
+	if err != nil {
+		log.Fatal("Failed to initialize cbauth: ", err)
+	}
+}
+
 func main() {
 	initFlags()
 	if listenFlag == "" {
@@ -257,5 +276,6 @@ func main() {
 	http.HandleFunc("/bucket/", serveBucket)
 	http.HandleFunc("/h/", serveHostBucket)
 	go runStdinWatcher()
+	maybeReinitCBAuth()
 	log.Fatal(http.ListenAndServe(listenFlag, nil))
 }
