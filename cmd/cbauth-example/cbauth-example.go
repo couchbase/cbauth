@@ -160,6 +160,7 @@ func doServeBucket(w http.ResponseWriter, req *http.Request) (err error) {
 	if err != nil {
 		return
 	}
+	log.Printf("User name: `%s'", creds.Name())
 	canAccess, err := creds.CanAccessBucket(bucket)
 	if err != nil {
 		return
@@ -206,6 +207,7 @@ func doServeHostBucket(w http.ResponseWriter, req *http.Request) (err error) {
 	if err != nil {
 		return
 	}
+	log.Printf("User name: `%s'", creds.Name())
 	canAccess, err := creds.CanAccessBucket(bucket)
 	if err != nil {
 		return
