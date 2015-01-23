@@ -60,7 +60,8 @@ func assertAdmins(t *testing.T, c Creds, needAdmin, needROAdmin bool) {
 	if acc(c.IsAdmin()) != needAdmin {
 		t.Fatalf("admin access must be: %v", needAdmin)
 	}
-	if acc(c.IsROAdmin()) != needROAdmin {
+	roadmin := !acc(c.IsAdmin()) && c.CanReadAnyMetadata()
+	if roadmin != needROAdmin {
 		t.Fatalf("ro-admin access must be: %v", needROAdmin)
 	}
 }

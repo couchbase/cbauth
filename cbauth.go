@@ -56,8 +56,11 @@ type Creds interface {
 	// IsAdmin method returns true iff this creds represent valid
 	// admin account.
 	IsAdmin() (bool, error)
-	// IsROAdmin method returns true iff this creds represent valid
-	// read only admin account.
+	// CanReadAnyMetadata method returns true iff this creds has
+	// permission to read any metadata (i.e. admin or ro-admin).
+	CanReadAnyMetadata() bool
+	// IsROAdmin is confusing alias for CanReadAnyMetadata. Don't
+	// use!
 	IsROAdmin() (bool, error)
 	// CanAccessBucket method returns true iff this creds
 	// represent valid account that can read/write/query docs in given
@@ -81,6 +84,7 @@ type naCreds struct{}
 func (na naCreds) Name() string                                { return "" }
 func (na naCreds) IsAdmin() (bool, error)                      { return false, nil }
 func (na naCreds) IsROAdmin() (bool, error)                    { return false, nil }
+func (na naCreds) CanReadAnyMetadata() bool                    { return false }
 func (na naCreds) CanAccessBucket(bucket string) (bool, error) { return false, nil }
 func (na naCreds) CanReadBucket(bucket string) (bool, error)   { return false, nil }
 func (na naCreds) CanDDLBucket(bucket string) (bool, error)    { return false, nil }

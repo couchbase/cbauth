@@ -133,7 +133,13 @@ func (c *CredsImpl) IsAdmin() (bool, error) {
 // IsROAdmin method returns true iff this creds represent valid
 // read only admin account.
 func (c *CredsImpl) IsROAdmin() (bool, error) {
-	return c.isROAdmin || c.isAdmin, nil
+	return c.CanReadAnyMetadata(), nil
+}
+
+// CanReadAnyMetadata method returns true iff this creds represents
+// admin or ro-admin account.
+func (c *CredsImpl) CanReadAnyMetadata() bool {
+	return c.isROAdmin || c.isAdmin
 }
 
 func checkBucketPassword(db *credsDB, bucket, givenPassword string) bool {
