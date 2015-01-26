@@ -62,11 +62,15 @@ func initDefaultStore() *store {
 
 	storeurl := ""
 	authURL := os.Getenv("NS_SERVER_CBAUTH_URL")
+	if authURL == "" {
+		authURL = os.Getenv("CBAUTH_REVRPC_URL")
+	}
 	u, err := url.Parse(authURL)
 	if err == nil {
 		u.RawQuery = ""
 		u.Fragment = ""
 		u.Path = "/_metakv"
+		u.User = nil
 		storeurl = u.String()
 	}
 	return &store{url: storeurl, client: &c}
