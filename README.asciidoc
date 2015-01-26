@@ -1,0 +1,105 @@
+= 4 ways golang services can interact with ns_server
+Aliaksey Kandratsenka <alk@tut.by
+
+== Stats
+
+Stats is a simple way to expose certain state to ns_server. And
+preferred format is expvar's like as documented elsewhere.
+
+== metakv
+
+metakv is a simple way for your service to store certain low-traffic
+metadata (i.e. settings) in cluster-manager. metakv also allows you to
+subscribe to settings changes. So it makes it simple way for your
+service consume ns_server-managed settings. It is good at delivering
+settings changes to your service (or between services) in asynchronous
+fashion.
+
+Look at godoc of github.com/couchbase/cbauth/metakv package for more
+details.
+
+== revrpc
+
+revrpc is secure and simple-to-use facility to expose rpc services to
+ns_server. Unlike metakv it is well suited for cases when you need
+some synchronous updates from ns_server (and you can return something
+back too). Now-defunct "cluster topology changes management protocol"
+where ns_server needs to ask services to update their topology and
+wait for results is one example. cbauth itself is
+another. saslauthd-port is using revrpc too.
+
+As revrpc client you typically only need to create your Service
+instance and than start it via BabysitService while passing your rpc
+setup function. That function will receive rpc.Server instance and is
+expected to publish whatever rpc service you need onto that rpc.Server
+instance. Instances published in this way are available via simple
+call to ns_server's json_rpc_connection module. I.e. revrpc gives you
+all convenience of net/rpc. See net/rpc and net/rpc/jsonrpc godoc for
+details.
+
+Thus revrpc calls are convenient to use both for ns_server side and
+golang side.
+
+Note that as of now there are no users of revrpc outside of cbauth
+itself, but I do anticipate that this might change. It is certainly
+going to be our preferred choice in cases we're given choice.
+
+One arguable downside of revrpc is that it's harder to invoke it
+manually because it's not just plain REST API (which is merely a flip
+side of security advantage mentioned above). We will provide script to
+help folks perform arbitrary revrpc calls via ns_server.
+
+Under the hood revrpc works by establishing special connection to
+ns_server (with authorization and via special http method). And then
+using "plain socket" jsonrpc from ns_server to your service via that
+connection. Thus "rev" (from reverse) in it's name. Even though just
+single connection is used per single revrpc.Service instance, it can
+deal with arbitrary number of outstanding, in-flight calls. This is
+feature of json-rpc spec (i.e. out-of-order replies). And golang's
+net/rpc facility is enabling it by simply spawning fresh goroutine for
+every incoming call (which then "injects" response into
+rpc.ServerCodec as soon as result is ready).
+
+revrpc is usually initialized by CBAUTH_REVRPC_URL variable (of the
+form of
+http://%40:<urlencoded-node's-password>@127.0.0.1:8091/<your-program's-name>). At
+time of this writing it also supports original "legacy" environment
+variables: NS_SERVER_CBAUTH_{RPC_URL,USER,PWD}, but I plan to drop
+that as soon as possible.
+
+In order to use it for your service look at
+revrpc.GetDefaultServiceFromEnv. serviceName argument is "subservice"
+that you want to expose. "cbauth" subservice is reserved for cbauth
+itself. So your subservice for e.g. indexer could be "main" or
+"indexer". Then at ns_server's side Label argument to
+json_rpc_connection:perform_call function would be 'indexer-indexer'
+(service, dash, subservice).
+
+Note that there is currently no way to stop revrpc service that is
+started. Due to lack of demand for that feature.
+
+== cbauth
+
+cbauth is simple way to get credentials to access cluster services and
+to authenticate/authorize incoming http requests.
+
+See this package's godoc as well as ./cmd/multi-bucket-demo and
+./cmd/cbauth-demo programs for user API.
+
+cbauth works by receiving cluster-manager's "creds database" via
+revrpc facility (described above). revrpc itself is configured via
+environment variable(s) passed by ns_server. So, unlike in initial
+implementation, cbauth is not directly configured from environment
+variables anymore, but is merely one of consumers of revrpc.
+
+It is quite important to internalize that cbauth works only if revrpc
+is properly configured. When your service is started by ns_server this
+is usually the case.
+
+Sometimes you want to start your application manually (i.e. for
+debugging). In which case consider looking at
+cbauth.InternalRetryDefaultInit function for way to initialize cbauth
+"manually". But note that in any case cbauth will in still depend on
+working (and up-to-date) ns_server. Or you might want to set revrpc
+environment variable manually prior to running your program (see
+above).
