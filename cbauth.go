@@ -107,7 +107,7 @@ var ErrStale = cbauthimpl.ErrStale
 type UnknownHostPortError string
 
 func (s UnknownHostPortError) Error() string {
-	return fmt.Sprintf("Unable to find given hostport in cbauth database: `%s'", s)
+	return fmt.Sprintf("Unable to find given hostport in cbauth database: `%s'", string(s))
 }
 
 func doOnServer(s *cbauthimpl.Svc, hdr http.Header) (Creds, error) {

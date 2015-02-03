@@ -378,3 +378,7 @@ func TestTokenAdmin(t *testing.T) {
 		t.Errorf("Expected to be able to access all buckets. Failed at ffee")
 	}
 }
+
+func TestUnknownHostPortErrorFormatting(t *testing.T) {
+	t.Log("Error: ", UnknownHostPortError("asdsd").Error())
+}
