@@ -7,16 +7,18 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/couchbase/cbauth/cbauthimpl"
+	"github.com/couchbase/cbauth/revrpc"
 )
 
 func newAuth(initPeriod time.Duration) *authImpl {
-	svc := cbauthimpl.NewSVC(initPeriod)
-	return &authImpl{svc}
+	return &authImpl{cbauthimpl.NewSVC(initPeriod, &DBStaleError{})}
 }
 
 func must(err error) {
@@ -48,7 +50,7 @@ func newAuthForTest(body func(freshChan chan struct{}, timeoutBody func())) *aut
 		body(ch, timeoutBody)
 	}
 
-	return &authImpl{cbauthimpl.NewSVCForTest(testDur, wf)}
+	return &authImpl{cbauthimpl.NewSVCForTest(testDur, &DBStaleError{}, wf)}
 }
 
 func acc(ok bool, err error) bool {
@@ -150,7 +152,7 @@ func TestStaleBasic(t *testing.T) {
 	for _, period := range []time.Duration{1, 0} {
 		a := newAuth(period)
 		_, err := a.Auth("asd", "bsd")
-		if err != ErrStale {
+		if _, ok := err.(*DBStaleError); !ok {
 			t.Fatalf("For period: %v expect ErrStale in stale state. Got %v", period, err)
 		}
 	}
@@ -175,7 +177,7 @@ func TestStale(t *testing.T) {
 	})
 
 	_, err := a.Auth("a", "b")
-	if err != ErrStale {
+	if _, ok := err.(*DBStaleError); !ok {
 		t.Fatalf("Expect ErrStale in stale state. Got %v", err)
 	}
 
@@ -223,7 +225,7 @@ func doTestStaleThenAdmin(t *testing.T, updateBeforeTimer bool) {
 			t.Fatal("user admin must be recognised as admin")
 		}
 	} else {
-		if err != ErrStale {
+		if _, ok := err.(*DBStaleError); !ok {
 			t.Fatal("db must be stale")
 		}
 		updatechan <- true
@@ -381,4 +383,40 @@ func TestTokenAdmin(t *testing.T) {
 
 func TestUnknownHostPortErrorFormatting(t *testing.T) {
 	t.Log("Error: ", UnknownHostPortError("asdsd").Error())
+}
+
+func TestStaleErrorFormatting(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer s.Close()
+
+	rpcsvc := revrpc.MustService(s.URL + "/test")
+	a := newAuth(10 * time.Second)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		oldDef := revrpc.DefaultBabysitErrorPolicy.(revrpc.DefaultErrorPolicy)
+		defer func() {
+			revrpc.DefaultBabysitErrorPolicy = oldDef
+		}()
+		tmpDef := oldDef
+		tmpDef.RestartsToExit = 1
+		revrpc.DefaultBabysitErrorPolicy = tmpDef
+		runRPCForSvc(rpcsvc, a.svc)
+		wg.Done()
+	}()
+
+	_, err := a.Auth("", "")
+	se, ok := err.(*DBStaleError)
+	if !ok {
+		t.Fatalf("Expected stale error. Got: %s", err)
+	}
+	errString := se.Error()
+	t.Log("error string: ", errString)
+	expectedString := "CBAuth database is stale: last reason: Need 200 status!. Got "
+	if errString[:len(expectedString)] != expectedString {
+		t.Fatalf("Expecting specific prefix of stale error. Got %s", errString)
+	}
+	wg.Wait()
 }

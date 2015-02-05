@@ -98,9 +98,18 @@ type authImpl struct {
 	svc *cbauthimpl.Svc
 }
 
-// ErrStale is used to indicate that cbauth internal state is not
-// synchronized with ns_server yet or anymore. It should be transient.
-var ErrStale = cbauthimpl.ErrStale
+// DBStaleError is kind of error that signals that cbauth internal
+// state is not synchronized with ns_server yet or anymore.
+type DBStaleError struct {
+	Err error
+}
+
+func (e *DBStaleError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("CBAuth database is stale: last reason: %s", e.Err)
+	}
+	return "CBAuth database is stale. Was never updated yet."
+}
 
 // UnknownHostPortError is returned from GetMemcachedServiceAuth and
 // GetHTTPServiceAuth calls for unknown host:port arguments.

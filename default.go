@@ -35,23 +35,32 @@ import (
 // ns_server.
 var Default Authenticator
 
+var errDisconnected = errors.New("revrpc connection to ns_server was closed")
+
+func runRPCForSvc(rpcsvc *revrpc.Service, svc *cbauthimpl.Svc) error {
+	defPolicy := revrpc.DefaultBabysitErrorPolicy.New()
+	// error restart policy that we're going to use simply
+	// resets service before delegating to default restart
+	// policy. That way we always mark service as stale
+	// right after some error occurred.
+	cbauthPolicy := func(err error) error {
+		resetErr := err
+		if err == nil {
+			resetErr = errDisconnected
+		}
+		cbauthimpl.ResetSvc(svc, &DBStaleError{resetErr})
+		return defPolicy(err)
+	}
+	return revrpc.BabysitService(func(s *rpc.Server) error {
+		return s.RegisterName("AuthCacheSvc", svc)
+	}, rpcsvc, revrpc.FnBabysitErrorPolicy(cbauthPolicy))
+}
+
 func startDefault(rpcsvc *revrpc.Service) {
-	svc := cbauthimpl.NewSVC(5 * time.Second)
+	svc := cbauthimpl.NewSVC(5*time.Second, &DBStaleError{})
 	Default = &authImpl{svc}
 	go func() {
-		defPolicy := revrpc.DefaultBabysitErrorPolicy.New()
-		// error restart policy that we're going to use simply
-		// resets service before delegating to default restart
-		// policy. That way we always mark service as stale
-		// right after some error occurred.
-		cbauthPolicy := func(err error) error {
-			cbauthimpl.ResetSvc(svc)
-			return defPolicy(err)
-		}
-		err := revrpc.BabysitService(func(s *rpc.Server) error {
-			return s.RegisterName("AuthCacheSvc", svc)
-		}, rpcsvc, revrpc.FnBabysitErrorPolicy(cbauthPolicy))
-		panic(err)
+		panic(runRPCForSvc(rpcsvc, svc))
 	}()
 }
 

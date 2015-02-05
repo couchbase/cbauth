@@ -21,7 +21,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -183,6 +182,7 @@ func (c *CredsImpl) CanDDLBucket(bucket string) (bool, error) {
 type Svc struct {
 	l         sync.Mutex
 	db        *credsDB
+	staleErr  error
 	freshChan chan struct{}
 }
 
@@ -227,24 +227,38 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 }
 
 // ResetSvc marks service's db as stale.
-func ResetSvc(s *Svc) {
+func ResetSvc(s *Svc, staleErr error) {
+	if staleErr == nil {
+		panic("staleErr must be non-nil")
+	}
 	s.l.Lock()
+	s.staleErr = staleErr
 	updateDBLocked(s, nil)
 	s.l.Unlock()
 }
 
+func staleError(s *Svc) error {
+	if s.staleErr == nil {
+		panic("impossible Svc state where staleErr is nil!")
+	}
+	return s.staleErr
+}
+
 // NewSVC constructs Svc instance. Period is initial period of time
-// where attempts to access stale DB won't cause ErrStale responses,
+// where attempts to access stale DB won't cause DBStaleError responses,
 // but service will instead wait for UpdateDB call.
-func NewSVC(period time.Duration) *Svc {
-	return NewSVCForTest(period, func(period time.Duration, freshChan chan struct{}, body func()) {
+func NewSVC(period time.Duration, staleErr error) *Svc {
+	return NewSVCForTest(period, staleErr, func(period time.Duration, freshChan chan struct{}, body func()) {
 		time.AfterFunc(period, body)
 	})
 }
 
 // NewSVCForTest constructs Svc isntance.
-func NewSVCForTest(period time.Duration, waitfn func(time.Duration, chan struct{}, func())) *Svc {
-	s := &Svc{}
+func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Duration, chan struct{}, func())) *Svc {
+	if staleErr == nil {
+		panic("staleErr must be non-nil")
+	}
+	s := &Svc{staleErr: staleErr}
 	if period != time.Duration(0) {
 		s.freshChan = make(chan struct{})
 		waitfn(period, s.freshChan, func() {
@@ -258,9 +272,6 @@ func NewSVCForTest(period time.Duration, waitfn func(time.Duration, chan struct{
 	}
 	return s
 }
-
-// ErrStale is used to indicate that cbauth state is stale.
-var ErrStale = errors.New("CBAuth database is stale")
 
 func fetchDB(s *Svc) *credsDB {
 	s.l.Lock()
@@ -304,7 +315,7 @@ func copyHeader(name string, from, to http.Header) {
 func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	db := fetchDB(s)
 	if db == nil {
-		return nil, ErrStale
+		return nil, staleError(s)
 	}
 
 	if s.db.tokenCheckURL == "" {
@@ -356,7 +367,7 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	db := fetchDB(s)
 	if db == nil {
-		return nil, ErrStale
+		return nil, staleError(s)
 	}
 	rv := &CredsImpl{name: user, password: password, db: db}
 
@@ -389,7 +400,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 func GetPassword(s *Svc, host string, port int) (user, pwd string, err error) {
 	db := fetchDB(s)
 	if db == nil {
-		return "", "", ErrStale
+		return "", "", staleError(s)
 	}
 	for _, n := range db.nodes {
 		user, pwd = getMemcachedCreds(n, host, port)
