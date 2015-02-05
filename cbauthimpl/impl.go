@@ -204,6 +204,14 @@ func cacheToCredsDB(c *Cache) *credsDB {
 	}
 }
 
+func updateDBLocked(s *Svc, db *credsDB) {
+	s.db = db
+	if s.freshChan != nil {
+		close(s.freshChan)
+		s.freshChan = nil
+	}
+}
+
 // UpdateDB is a revrpc method that is used by ns_server update cbauth
 // state.
 func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
@@ -213,11 +221,7 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 	// BUG(alk): consider some kind of CAS later
 	db := cacheToCredsDB(c)
 	s.l.Lock()
-	s.db = db
-	if s.freshChan != nil {
-		close(s.freshChan)
-		s.freshChan = nil
-	}
+	updateDBLocked(s, db)
 	s.l.Unlock()
 	return nil
 }
@@ -225,7 +229,7 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 // ResetSvc marks service's db as stale.
 func ResetSvc(s *Svc) {
 	s.l.Lock()
-	s.db = nil
+	updateDBLocked(s, nil)
 	s.l.Unlock()
 }
 
