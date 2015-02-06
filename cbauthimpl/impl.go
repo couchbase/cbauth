@@ -328,6 +328,7 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	}
 
 	copyHeader(tokenHeader, reqHeaders, req.Header)
+	copyHeader("Ns_server-Auth-Token", reqHeaders, req.Header)
 	copyHeader("Cookie", reqHeaders, req.Header)
 	copyHeader("Authorization", reqHeaders, req.Header)
 
