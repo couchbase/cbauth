@@ -129,5 +129,20 @@ func doExecuteBasicSanityTest(log func(v ...interface{}), s *store) {
 		panic("bad mutation")
 	}
 
+	err = s.set("/_sanity/key", []byte("more value"), nil)
+	noPanic(err)
+	v, r, err = s.get("/_sanity/key")
+	noPanic(err)
+	if r == nil || string(v) != "more value" {
+		panic("expecting more value got: " + string(v))
+	}
+	err = s.delete("/_sanity/key", nil)
+	noPanic(err)
+	v, r, err = s.get("/_sanity/key")
+	noPanic(err)
+	if r != nil {
+		panic("expected key to be missing after successful delete")
+	}
+
 	log("Completed metakv sanity test")
 }
