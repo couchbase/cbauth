@@ -30,11 +30,11 @@ func kvEqual(a, b KVEntry) bool {
 }
 
 // ExecuteBasicSanityTest runs basic sanity test.
-func ExecuteBasicSanityTest(log func(msg string)) {
+func ExecuteBasicSanityTest(log func(v ...interface{})) {
 	doExecuteBasicSanityTest(log, defaultStore)
 }
 
-func doExecuteBasicSanityTest(log func(msg string), s *store) {
+func doExecuteBasicSanityTest(log func(v ...interface{}), s *store) {
 	log("Starting basic sanity test")
 	l, err := s.listAllChildren("/_sanity/")
 	noPanic(err)

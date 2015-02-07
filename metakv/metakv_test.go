@@ -238,9 +238,6 @@ func TestSanity(t *testing.T) {
 	kv := &mockKV{}
 	defer kv.runMock()()
 
-	log := func(msg string) {
-		t.Log(msg)
-	}
 	mockStore := &store{
 		url:    kv.srv.URL + "/_metakv",
 		client: http.DefaultClient,
@@ -249,5 +246,5 @@ func TestSanity(t *testing.T) {
 	if err := mockStore.add("/_sanity/garbage", []byte("v")); err != nil {
 		t.Log("add failed with: %v", err)
 	}
-	doExecuteBasicSanityTest(log, mockStore)
+	doExecuteBasicSanityTest(t.Log, mockStore)
 }
