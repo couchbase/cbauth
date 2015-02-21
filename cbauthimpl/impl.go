@@ -79,12 +79,13 @@ func verifyCreds(u User, user, password string) bool {
 }
 
 type credsDB struct {
-	nodes          []Node
-	buckets        map[string]string
-	admin          User
-	roadmin        User
-	hasNoPwdBucket bool
-	tokenCheckURL  string
+	nodes           []Node
+	buckets         map[string]string
+	admin           User
+	roadmin         User
+	hasNoPwdBucket  bool
+	tokenCheckURL   string
+	specialPassword string
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
@@ -141,6 +142,10 @@ func (c *CredsImpl) CanReadAnyMetadata() bool {
 	return c.isROAdmin || c.isAdmin
 }
 
+func verifySpecialCreds(db *credsDB, user, password string) bool {
+	return user == "@" && password == db.specialPassword
+}
+
 func checkBucketPassword(db *credsDB, bucket, givenPassword string) bool {
 	// TODO: one day we'll care enough to do something like
 	// subtle.ConstantTimeCompare, but note that it's going to be
@@ -186,7 +191,7 @@ type Svc struct {
 	freshChan chan struct{}
 }
 
-func cacheToCredsDB(c *Cache) *credsDB {
+func cacheToCredsDB(c *Cache) (db *credsDB) {
 	hasNoPwdBucket := false
 	for _, pwd := range c.Buckets {
 		if pwd == "" {
@@ -194,7 +199,7 @@ func cacheToCredsDB(c *Cache) *credsDB {
 			break
 		}
 	}
-	return &credsDB{
+	db = &credsDB{
 		nodes:          c.Nodes,
 		buckets:        c.Buckets,
 		admin:          c.Admin,
@@ -202,6 +207,13 @@ func cacheToCredsDB(c *Cache) *credsDB {
 		hasNoPwdBucket: hasNoPwdBucket,
 		tokenCheckURL:  c.TokenCheckURL,
 	}
+	for _, node := range db.nodes {
+		if node.Local {
+			db.specialPassword = node.Password
+			break
+		}
+	}
+	return
 }
 
 func updateDBLocked(s *Svc, db *credsDB) {
@@ -373,6 +385,8 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	rv := &CredsImpl{name: user, password: password, db: db}
 
 	switch {
+	case verifySpecialCreds(db, user, password):
+		rv.isAdmin = true
 	case verifyCreds(db.admin, user, password):
 		rv.isAdmin = true
 	case verifyCreds(db.roadmin, user, password):
