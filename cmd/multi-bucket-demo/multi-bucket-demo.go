@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/couchbase/cbauth"
-	couchbase "github.com/couchbaselabs/go-couchbase"
+	couchbase "github.com/couchbase/go-couchbase"
 )
 
 var serverURL = flag.String("serverURL", "http://localhost:9000", "couchbase server URL")
