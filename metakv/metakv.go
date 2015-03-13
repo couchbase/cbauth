@@ -120,6 +120,13 @@ func assertValidPath(path string) {
 	}
 }
 
+// Assert path ends with "/"
+func assertValidDirPath(dirpath string) {
+	if !strings.HasSuffix(dirpath, "/") {
+		panic("dirpath must end with \"/\"")
+	}
+}
+
 // Get returns matching value and revision for given key. Returns nil
 // value, nil rev and nil error when given path doesn't exist.
 func (s *store) get(path string) (value []byte, rev interface{}, err error) {
@@ -180,6 +187,12 @@ func (s *store) delete(path string, rev interface{}) error {
 	return mutate(s, "delete", path, nil, rev, false)
 }
 
+// Recursive Delete deletes all keys that are children of given directory path.
+func (s *store) recursiveDelete(dirpath string) error {
+	assertValidDirPath(dirpath)
+	return mutate(s, "recursive_delete", dirpath, nil, nil, false)
+}
+
 // IterateChildren invokes given callback on every kv-pair that's
 // child of given directory path. Path must end on "/".
 func (s *store) iterateChildren(dirpath string, callback Callback) error {
@@ -202,10 +215,7 @@ func (s *store) runObserveChildren(dirpath string, callback Callback, cancel <-c
 
 func doRunObserveChildren(s *store, dirpath string, callback Callback, cancel <-chan struct{}) error {
 	assertValidPath(dirpath)
-	if !strings.HasSuffix(dirpath, "/") {
-		panic("dirpath must end with \"/\"")
-	}
-
+	assertValidDirPath(dirpath)
 	values := url.Values{"path": {dirpath}}
 	if cancel == nil {
 		values.Set("continuous", "false")
@@ -295,6 +305,11 @@ func Add(path string, value []byte) error {
 // Delete deletes given key.
 func Delete(path string, rev interface{}) error {
 	return defaultStore.delete(path, rev)
+}
+
+// RecursiveDelete deletes all keys that are children of given directory path.
+func RecursiveDelete(dirpath string) error {
+	return defaultStore.recursiveDelete(dirpath)
 }
 
 // IterateChildren invokes given callback on every kv-pair that's
