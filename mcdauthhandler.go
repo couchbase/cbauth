@@ -18,8 +18,8 @@ package cbauth
 import (
 	"net/http"
 
-	"github.com/couchbase/gomemcached/client"
 	couchbase "github.com/couchbase/go-couchbase"
+	"github.com/couchbase/gomemcached/client"
 )
 
 // AuthHandler is a type that implements go-couchbase AuthHandler,
