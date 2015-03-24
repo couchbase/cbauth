@@ -53,6 +53,8 @@ type Authenticator interface {
 type Creds interface {
 	// Name method returns user name (e.g. for auditing)
 	Name() string
+	// Source method returns user source (for auditing)
+	Source() string
 	// IsAdmin method returns true iff this creds represent valid
 	// admin account.
 	IsAdmin() (bool, error)
@@ -82,6 +84,7 @@ var _ Creds = (*cbauthimpl.CredsImpl)(nil)
 type naCreds struct{}
 
 func (na naCreds) Name() string                                { return "" }
+func (na naCreds) Source() string                              { return "" }
 func (na naCreds) IsAdmin() (bool, error)                      { return false, nil }
 func (na naCreds) IsROAdmin() (bool, error)                    { return false, nil }
 func (na naCreds) CanReadAnyMetadata() bool                    { return false }

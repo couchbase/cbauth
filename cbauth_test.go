@@ -72,6 +72,7 @@ type testingRoundTripper struct {
 	method  string
 	url     string
 	user    string
+	source  string
 	token   string
 	role    string
 	tripped bool
@@ -112,7 +113,7 @@ func (rt *testingRoundTripper) RoundTrip(req *http.Request) (res *http.Response,
 	response := ""
 	status := "401 Unauthorized"
 	if statusCode == 200 {
-		response = fmt.Sprintf(`{"role": "%s", "user": "%s"}`, rt.role, rt.user)
+		response = fmt.Sprintf(`{"role": "%s", "user": "%s", "source": "%s"}`, rt.role, rt.user, rt.source)
 		status = "200 OK"
 	}
 
@@ -142,8 +143,9 @@ func (rt *testingRoundTripper) assertTripped(t *testing.T, expected bool) {
 	}
 }
 
-func (rt *testingRoundTripper) setTokenAuth(user, token, role string) {
+func (rt *testingRoundTripper) setTokenAuth(user, source, token, role string) {
 	rt.token = token
+	rt.source = source
 	rt.user = user
 	rt.role = role
 }
@@ -351,7 +353,7 @@ func TestTokenAdmin(t *testing.T) {
 	url := "http://127.0.0.1:9000/_auth"
 
 	tr := newTestingRT("POST", url)
-	tr.setTokenAuth("Administrator", "1234567890", "admin")
+	tr.setTokenAuth("Administrator", "saslauthd", "1234567890", "admin")
 
 	defer overrideDefClient(&http.Client{Transport: tr})()
 
@@ -371,6 +373,10 @@ func TestTokenAdmin(t *testing.T) {
 
 	if c.Name() != "Administrator" {
 		t.Errorf("Expect name to be Administrator")
+	}
+
+	if c.Source() != "saslauthd" {
+		t.Errorf("Expect source to be saslauthd. Got %s", c.Source())
 	}
 
 	if !acc(c.CanAccessBucket("asdasdasdasd")) {

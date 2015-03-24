@@ -100,14 +100,15 @@ type Cache struct {
 // CredsImpl implements cbauth.Creds interface.
 type CredsImpl struct {
 	name      string
+	source    string
 	isAdmin   bool
 	isROAdmin bool
 	password  string
 	db        *credsDB
 }
 
-func credsFromUserRole(user, role string, db *credsDB) *CredsImpl {
-	rv := CredsImpl{name: user, db: db}
+func credsFromUserRoleSource(user, role, source string, db *credsDB) *CredsImpl {
+	rv := CredsImpl{name: user, source: source, db: db}
 	switch role {
 	case "admin":
 		rv.isAdmin = true
@@ -122,6 +123,11 @@ func credsFromUserRole(user, role string, db *credsDB) *CredsImpl {
 // Name method returns user name (e.g. for auditing)
 func (c *CredsImpl) Name() string {
 	return c.name
+}
+
+// Name method returns user source (for auditing)
+func (c *CredsImpl) Source() string {
+	return c.source
 }
 
 // IsAdmin method returns true iff this creds represent valid
@@ -364,14 +370,14 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	}
 
 	resp := struct {
-		Role, User string
+		Role, User, Source string
 	}{}
 	err = json.Unmarshal(body, &resp)
 	if err != nil {
 		return nil, err
 	}
 
-	return credsFromUserRole(resp.User, resp.Role, db), nil
+	return credsFromUserRoleSource(resp.User, resp.Role, resp.Source, db), nil
 }
 
 // VerifyPassword verifies given user/password creds against cbauth
@@ -382,7 +388,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	if db == nil {
 		return nil, staleError(s)
 	}
-	rv := &CredsImpl{name: user, password: password, db: db}
+	rv := &CredsImpl{name: user, source: "ns_server", password: password, db: db}
 
 	switch {
 	case verifySpecialCreds(db, user, password):
