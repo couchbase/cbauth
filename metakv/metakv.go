@@ -143,7 +143,7 @@ func (s *store) get(path string) (value []byte, rev interface{}, err error) {
 	return kve.Value, rev, nil
 }
 
-func mutate(s *store, method string, path string, value []byte, rev interface{}, create bool) error {
+func mutate(s *store, method string, path string, value []byte, rev interface{}, create bool, sensitive bool) error {
 	assertValidPath(path)
 
 	values := url.Values{
@@ -164,6 +164,12 @@ func mutate(s *store, method string, path string, value []byte, rev interface{},
 		values.Set("rev", string(revBytes))
 	}
 
+	if sensitive {
+		values.Set("sensitive", "true")
+	} else {
+		values.Set("sensitive", "false")
+	}
+
 	_, err := doCall(s, method, values)
 	return err
 }
@@ -172,25 +178,25 @@ func mutate(s *store, method string, path string, value []byte, rev interface{},
 // value used to detect races with concurrent mutators in typical
 // read-modify-write cases. Rev is supposed to be same value that is
 // returned from get.
-func (s *store) set(path string, value []byte, rev interface{}) error {
-	return mutate(s, "set", path, value, rev, false)
+func (s *store) set(path string, value []byte, rev interface{}, sensitive bool) error {
+	return mutate(s, "set", path, value, rev, false, sensitive)
 }
 
 // Add creates given kv pair. Which must not exist in storage
 // yet. ErrRevMismatch is returned if pair with such key exists.
-func (s *store) add(path string, value []byte) error {
-	return mutate(s, "set", path, value, nil, true)
+func (s *store) add(path string, value []byte, sensitive bool) error {
+	return mutate(s, "set", path, value, nil, true, sensitive)
 }
 
 // Delete deletes given key.
 func (s *store) delete(path string, rev interface{}) error {
-	return mutate(s, "delete", path, nil, rev, false)
+	return mutate(s, "delete", path, nil, rev, false, false)
 }
 
 // Recursive Delete deletes all keys that are children of given directory path.
 func (s *store) recursiveDelete(dirpath string) error {
 	assertValidDirPath(dirpath)
-	return mutate(s, "recursive_delete", dirpath, nil, nil, false)
+	return mutate(s, "recursive_delete", dirpath, nil, nil, false, false)
 }
 
 // IterateChildren invokes given callback on every kv-pair that's
@@ -293,13 +299,23 @@ func Get(path string) (value []byte, rev interface{}, err error) {
 // read-modify-write cases. Rev is supposed to be same value that is
 // returned from get.
 func Set(path string, value []byte, rev interface{}) error {
-	return defaultStore.set(path, value, rev)
+	return defaultStore.set(path, value, rev, false)
+}
+
+// Set for storing sensitive info.
+func SetSensitive(path string, value []byte, rev interface{}) error {
+	return defaultStore.set(path, value, rev, true)
 }
 
 // Add creates given kv pair. Which must not exist in storage
 // yet. ErrRevMismatch is returned if pair with such key exists.
 func Add(path string, value []byte) error {
-	return defaultStore.add(path, value)
+	return defaultStore.add(path, value, false)
+}
+
+// Add for storing sensitive info.
+func AddSensitive(path string, value []byte) error {
+	return defaultStore.add(path, value, true)
 }
 
 // Delete deletes given key.

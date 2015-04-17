@@ -19,7 +19,7 @@ func doAppend(s *store, path string, value []byte) error {
 		rev = RevCreate
 	}
 	oldv = append(oldv, value...)
-	return s.set(path, oldv, rev)
+	return s.set(path, oldv, rev, false)
 }
 
 func kvEqual(a, b KVEntry) bool {
@@ -80,7 +80,7 @@ func doExecuteBasicSanityTest(log func(v ...interface{}), s *store) {
 		panic("badness")
 	}
 
-	err = s.set("/_sanity/key", []byte("new value"), r)
+	err = s.set("/_sanity/key", []byte("new value"), r, false)
 	noPanic(err)
 
 	err = s.delete("/_sanity/key", r)
@@ -129,7 +129,7 @@ func doExecuteBasicSanityTest(log func(v ...interface{}), s *store) {
 		panic("bad mutation")
 	}
 
-	err = s.set("/_sanity/key", []byte("more value"), nil)
+	err = s.set("/_sanity/key", []byte("more value"), nil, false)
 	noPanic(err)
 	v, r, err = s.get("/_sanity/key")
 	noPanic(err)
