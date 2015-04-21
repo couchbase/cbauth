@@ -68,6 +68,12 @@ type User struct {
 	Mac  []byte
 }
 
+// Bucket struct is used as part of Cache messages to describe bucket auth
+type Bucket struct {
+	Name     string
+	Password string
+}
+
 func verifyCreds(u User, user, password string) bool {
 	if u.User == "" || u.User != user {
 		return false
@@ -91,7 +97,7 @@ type credsDB struct {
 // Cache is a structure into which the revrpc json is unmarshalled
 type Cache struct {
 	Nodes         []Node
-	Buckets       map[string]string
+	Buckets       []Bucket
 	Admin         User
 	ROAdmin       User   `json:"roAdmin"`
 	TokenCheckURL string `json:"tokenCheckUrl"`
@@ -198,20 +204,19 @@ type Svc struct {
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
-	hasNoPwdBucket := false
-	for _, pwd := range c.Buckets {
-		if pwd == "" {
-			hasNoPwdBucket = true
-			break
-		}
-	}
 	db = &credsDB{
 		nodes:          c.Nodes,
-		buckets:        c.Buckets,
+		buckets:        make(map[string]string),
 		admin:          c.Admin,
 		roadmin:        c.ROAdmin,
-		hasNoPwdBucket: hasNoPwdBucket,
+		hasNoPwdBucket: false,
 		tokenCheckURL:  c.TokenCheckURL,
+	}
+	for _, bucket := range c.Buckets {
+		if bucket.Password == "" {
+			db.hasNoPwdBucket = true
+		}
+		db.buckets[bucket.Name] = bucket.Password
 	}
 	for _, node := range db.nodes {
 		if node.Local {

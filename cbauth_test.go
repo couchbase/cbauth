@@ -258,9 +258,18 @@ func TestStaleThenAdminUpdateCase(t *testing.T) {
 	doTestStaleThenAdmin(t, true)
 }
 
+func mkBucket(name, pwd string) (rv cbauthimpl.Bucket) {
+	rv.Name = name
+	rv.Password = pwd
+	return
+}
+
 func TestBucketsAuth(t *testing.T) {
 	a := newAuth(0)
-	must(a.svc.UpdateDB(&cbauthimpl.Cache{Buckets: map[string]string{"default": "", "foo": "bar"}}, nil))
+	must(a.svc.UpdateDB(&cbauthimpl.Cache{
+		Buckets: append(cbauthimpl.Cache{}.Buckets,
+			mkBucket("default", ""),
+			mkBucket("foo", "bar"))}, nil))
 	c, err := a.Auth("foo", "bar")
 	must(err)
 	if !acc(c.CanAccessBucket("foo")) {
@@ -290,7 +299,9 @@ func TestBucketsAuth(t *testing.T) {
 	}
 
 	// now somebody deletes no-password default bucket
-	must(a.svc.UpdateDB(&cbauthimpl.Cache{Buckets: map[string]string{"foo": "bar"}}, nil))
+	must(a.svc.UpdateDB(&cbauthimpl.Cache{
+		Buckets: append(cbauthimpl.Cache{}.Buckets,
+			mkBucket("foo", "bar"))}, nil))
 	c, err = a.Auth("foo", "bar")
 	must(err)
 	assertAdmins(t, c, false, false)
