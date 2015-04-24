@@ -67,7 +67,11 @@ var sockPath = initSockpath()
 func initSockpath() string {
 	s := os.Getenv("CBAUTH_SOCKPATH")
 	if s == "" {
-		s = "/var/run/saslauthd/mux"
+		if _, err := os.Stat("/var/run/saslauthd/mux"); err == nil {
+			s = "/var/run/saslauthd/mux"
+		} else {
+			s = "/var/run/sasl2/mux"
+		}
 	}
 	return s
 }
