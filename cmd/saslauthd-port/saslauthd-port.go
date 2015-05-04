@@ -26,12 +26,12 @@ type SASLDAuth struct{}
 // AuthReq is struct used by request of SASLDAuth.Check
 type AuthReq struct {
 	User string
-	Pwd  string
+	Password  string
 }
 
 // Check method verifies given creds.
 func (sa SASLDAuth) Check(req *AuthReq, ok *bool) (err error) {
-	*ok, err = saslauthd.Auth(req.User, req.Pwd, service, realm)
+	*ok, err = saslauthd.Auth(req.User, req.Password, service, realm)
 	return
 }
 
