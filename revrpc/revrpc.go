@@ -253,7 +253,18 @@ func doGetServiceFromEnv(serviceName string) (*Service, error) {
 			"CBAUTH_REVRPC_URL is not set")
 	}
 
-	return NewService(rurl)
+	u, err := url.Parse(rurl)
+	if err != nil {
+		return nil, fmt.Errorf("cbauth environment variable "+
+			"CBAUTH_REVRPC_URL is malformed. "+
+			"Parsing it failed with: %s", err)
+	}
+
+	u.Path = u.Path + "-" + serviceName
+	surl := u.String()
+
+	// parsing url cannot fail due to way it was constructed.
+	return MustService(surl), nil
 }
 
 var defaultsGot = make(map[string]bool)
