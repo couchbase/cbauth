@@ -62,10 +62,7 @@ rpc.ServerCodec as soon as result is ready).
 
 revrpc is usually initialized by CBAUTH_REVRPC_URL variable (of the
 form of
-http://%40:<urlencoded-node's-password>@127.0.0.1:8091/<your-program's-name>). At
-time of this writing it also supports original "legacy" environment
-variables: NS_SERVER_CBAUTH_{RPC_URL,USER,PWD}, but I plan to drop
-that as soon as possible.
+http://%40:<urlencoded-node's-password>@127.0.0.1:8091/<your-program's-name>).
 
 In order to use it for your service look at
 revrpc.GetDefaultServiceFromEnv. serviceName argument is "subservice"

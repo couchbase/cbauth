@@ -54,8 +54,7 @@ func doRun() error {
 }
 
 func main() {
-	maybeSetEnv("NS_SERVER_CBAUTH_RPC_URL", "http://127.0.0.1:9000/rpcdemo")
-	maybeSetEnv("NS_SERVER_CBAUTH_USER", "Administrator")
-	maybeSetEnv("NS_SERVER_CBAUTH_PWD", "asdasd")
+	maybeSetEnv("CBAUTH_REVRPC_URL",
+		"http://Administrator:asdasd@127.0.0.1:9000/rpcdemo")
 	log.Fatal(doRun())
 }

@@ -247,38 +247,22 @@ func BabysitService(setupBody ServiceSetupCallback, svc *Service, errorPolicy Ba
 }
 
 func doGetServiceFromEnv(serviceName string) (*Service, error) {
-	if rurl := os.Getenv("CBAUTH_REVRPC_URL"); rurl != "" {
-		return NewService(rurl)
+	rurl := os.Getenv("CBAUTH_REVRPC_URL")
+	if rurl == "" {
+		return nil, fmt.Errorf("cbauth environment variable "+
+			"CBAUTH_REVRPC_URL is not set")
 	}
 
-	surl := os.Getenv("NS_SERVER_CBAUTH_RPC_URL")
-	user := os.Getenv("NS_SERVER_CBAUTH_USER")
-	pwd := os.Getenv("NS_SERVER_CBAUTH_PWD")
-	if surl == "" || user == "" || pwd == "" {
-		return nil, fmt.Errorf("Some cbauth environment variables are not set. I.e.: (rpc-url: `%s', user: `%s', pwd: `%s')", surl, user, pwd)
-	}
-	u, err := url.Parse(surl)
-	if err != nil {
-		return nil, fmt.Errorf("cbauth environment variable NS_SERVER_CBAUTH_RPC_URL is malformed. Parsing it failed with: %s", err)
-	}
-	u.User = url.UserPassword(user, pwd)
-	u.Path = u.Path + "-" + serviceName
-	surl = u.String()
-
-	// parsing url cannot fail due to way it was constructed.
-	return MustService(surl), nil
+	return NewService(rurl)
 }
 
 var defaultsGot = make(map[string]bool)
 var defaultsGotL sync.Mutex
 
 // GetDefaultServiceFromEnv returns Service instance that connects to
-// ns_server according to CBAUTH_REVRPC_URL environment variable (or
-// backwards compat variables NS_SERVER_CBAUTH_{RPC_URL,USER,PWD}
-// ). serviceName should be unique name of your revrpc service. cbauth
-// itself is using serviceName = "cbauth". Trying to obtain same
-// service twice will return error. I.e. you're supposed to get your
-// Service instance once and only once and hold it forever.
+// ns_server according to CBAUTH_REVRPC_URL environment variable. Trying to
+// obtain same service twice will return error. I.e. you're supposed to get
+// your Service instance once and only once and hold it forever.
 func GetDefaultServiceFromEnv(serviceName string) (*Service, error) {
 	defaultsGotL.Lock()
 	defer defaultsGotL.Unlock()
