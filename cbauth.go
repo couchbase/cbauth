@@ -177,7 +177,7 @@ func (a *authImpl) GetMemcachedServiceAuth(hostport string) (user, pwd string, e
 	if err != nil {
 		return "", "", err
 	}
-	user, pwd, err = cbauthimpl.GetPassword(a.svc, host, port)
+	user, _, pwd, err = cbauthimpl.GetCreds(a.svc, host, port)
 	if err == nil && user == "" && pwd == "" {
 		return "", "", UnknownHostPortError(hostport)
 	}
@@ -185,9 +185,13 @@ func (a *authImpl) GetMemcachedServiceAuth(hostport string) (user, pwd string, e
 }
 
 func (a *authImpl) GetHTTPServiceAuth(hostport string) (user, pwd string, err error) {
-	user, pwd, err = a.GetMemcachedServiceAuth(hostport)
-	if err == nil {
-		user = "@"
+	host, port, err := SplitHostPort(hostport)
+	if err != nil {
+		return "", "", err
+	}
+	_, user, pwd, err = cbauthimpl.GetCreds(a.svc, host, port)
+	if err == nil && user == "" && pwd == "" {
+		return "", "", UnknownHostPortError(hostport)
 	}
 	return
 }

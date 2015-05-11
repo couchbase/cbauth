@@ -330,6 +330,7 @@ func TestServicePwd(t *testing.T) {
 		Nodes: append(cbauthimpl.Cache{}.Nodes,
 			mkNode("beta.local", "_admin", "foobar", []int{9000, 12000}, false),
 			mkNode("chi.local", "_admin", "barfoo", []int{9001, 12001}, false)),
+		SpecialUser: "@component",
 	}
 
 	must(a.svc.UpdateDB(&c, nil))
@@ -347,7 +348,7 @@ func TestServicePwd(t *testing.T) {
 	}
 
 	u, p, _ = a.GetHTTPServiceAuth("chi.local:9001")
-	if u != "@" || p != "barfoo" {
+	if u != "@component" || p != "barfoo" {
 		t.Fatalf("Expect valid http creds for chi.local:9001. Got: %s:%s", u, p)
 	}
 }

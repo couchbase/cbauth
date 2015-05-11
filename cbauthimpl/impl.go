@@ -91,6 +91,7 @@ type credsDB struct {
 	roadmin         User
 	hasNoPwdBucket  bool
 	tokenCheckURL   string
+	specialUser     string
 	specialPassword string
 }
 
@@ -101,6 +102,7 @@ type Cache struct {
 	Admin         User
 	ROAdmin       User   `json:"roAdmin"`
 	TokenCheckURL string `json:"tokenCheckUrl"`
+	SpecialUser   string `json:"specialUser"`
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -211,6 +213,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		roadmin:        c.ROAdmin,
 		hasNoPwdBucket: false,
 		tokenCheckURL:  c.TokenCheckURL,
+		specialUser:    c.SpecialUser,
 	}
 	for _, bucket := range c.Buckets {
 		if bucket.Password == "" {
@@ -421,16 +424,18 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	return rv, nil
 }
 
-// GetPassword returns service password for given host and port. Or
-// "", "", nil if host/port represents unknown service.
-func GetPassword(s *Svc, host string, port int) (user, pwd string, err error) {
+// GetCreds returns service password for given host and port
+// together with memcached admin name and http special user.
+// Or "", "", "", nil if host/port represents unknown service.
+func GetCreds(s *Svc, host string, port int) (memcachedUser, user, pwd string, err error) {
 	db := fetchDB(s)
 	if db == nil {
-		return "", "", staleError(s)
+		return "", "", "", staleError(s)
 	}
 	for _, n := range db.nodes {
-		user, pwd = getMemcachedCreds(n, host, port)
-		if user != "" {
+		memcachedUser, pwd = getMemcachedCreds(n, host, port)
+		if memcachedUser != "" {
+			user = db.specialUser
 			return
 		}
 	}
