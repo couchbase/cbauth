@@ -155,7 +155,7 @@ func (c *CredsImpl) CanReadAnyMetadata() bool {
 }
 
 func verifySpecialCreds(db *credsDB, user, password string) bool {
-	return user == "@" && password == db.specialPassword
+	return len(user) > 0 && user[0] == '@' && password == db.specialPassword
 }
 
 func checkBucketPassword(db *credsDB, bucket, givenPassword string) bool {
