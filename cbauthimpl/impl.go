@@ -32,8 +32,8 @@ import (
 // ports of some cluster node.
 type Node struct {
 	Host     string
-	User     string `json:"admin_user"`
-	Password string `json:"admin_pass"`
+	User     string
+	Password string
 	Ports    []int
 	Local    bool
 }
