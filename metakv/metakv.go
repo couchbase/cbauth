@@ -61,10 +61,7 @@ func initDefaultStore() *store {
 	c.Transport = cbauth.WrapHTTPTransport(http.DefaultTransport, nil)
 
 	storeurl := ""
-	authURL := os.Getenv("NS_SERVER_CBAUTH_URL")
-	if authURL == "" {
-		authURL = os.Getenv("CBAUTH_REVRPC_URL")
-	}
+	authURL := os.Getenv("CBAUTH_REVRPC_URL")
 	u, err := url.Parse(authURL)
 	if err == nil {
 		u.RawQuery = ""
