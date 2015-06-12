@@ -243,7 +243,7 @@ func TestSanity(t *testing.T) {
 		client: http.DefaultClient,
 	}
 
-	if err := mockStore.add("/_sanity/garbage", []byte("v")); err != nil {
+	if err := mockStore.add("/_sanity/garbage", []byte("v"), false); err != nil {
 		t.Log("add failed with: %v", err)
 	}
 	doExecuteBasicSanityTest(t.Log, mockStore)
