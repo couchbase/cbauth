@@ -67,9 +67,16 @@ var sockPath = initSockpath()
 func initSockpath() string {
 	s := os.Getenv("CBAUTH_SOCKPATH")
 	if s == "" {
-		if _, err := os.Stat("/var/run/saslauthd/mux"); err == nil {
-			s = "/var/run/saslauthd/mux"
-		} else {
+		s = "/var/run/saslauthd/mux"
+
+		// we use alternative path only when we know for sure that
+		// previous path does not exist; this is to improve
+		// diagnosability; let's say, such path exists but we don't
+		// have permission to read it, then instead of telling the
+		// user that the alternative path doesn't exist, we want to
+		// show the actual error we get when trying to use the first
+		// one
+		if _, err := os.Stat(s); os.IsNotExist(err) {
 			s = "/var/run/sasl2/mux"
 		}
 	}
