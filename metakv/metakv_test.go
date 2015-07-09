@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -82,9 +83,73 @@ func (p entriesSlice) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 }
 
-func (kv *mockKV) Handle(w http.ResponseWriter, req *http.Request) {
-	req.ParseForm()
+func (kv *mockKV) checkRevision(rev, path string) bool {
+	if rev == "" {
+		return true
+	}
+	e := kv.data[path]
+	return string(e.r) == rev
+}
 
+func (kv *mockKV) Handle(w http.ResponseWriter, req *http.Request) {
+	path := strings.TrimPrefix(req.URL.Path, "/_metakv")
+	if path == req.URL.Path {
+		panic("Prefix /_metakv is not found")
+	}
+	isDir := strings.HasSuffix(path, "/")
+
+	if req.Method == "GET" && isDir {
+		kv.handleIterate(w, req)
+		return
+	}
+
+	kv.l.Lock()
+	defer kv.l.Unlock()
+
+	switch req.Method {
+	case "GET":
+		e, exists := kv.data[path]
+		if !exists {
+			w.Write([]byte("{}"))
+			return
+		}
+		replyJSON(w, map[string][]byte{"value": e.v, "rev": e.r})
+	case "PUT":
+		req.ParseForm()
+
+		form := req.PostForm
+		create := form.Get("create") != ""
+		value := form.Get("value")
+		rev := form.Get("rev")
+
+		if !kv.checkRevision(rev, path) {
+			w.WriteHeader(409)
+			return
+		}
+
+		if create {
+			if _, exists := kv.data[path]; exists {
+				w.WriteHeader(409)
+				return
+			}
+		}
+		kv.setLocked(path, value)
+	case "DELETE":
+		rev := req.URL.Query().Get("rev")
+
+		if !kv.checkRevision(rev, path) {
+			w.WriteHeader(409)
+			return
+		}
+
+		kv.broadcast(KVEntry{path, nil, nil})
+		delete(kv.data, path)
+	default:
+		w.WriteHeader(404)
+	}
+}
+
+func (kv *mockKV) handleIterate(w http.ResponseWriter, req *http.Request) {
 	kv.l.Lock()
 	locked := true
 	defer func() {
@@ -93,101 +158,47 @@ func (kv *mockKV) Handle(w http.ResponseWriter, req *http.Request) {
 		}
 	}()
 
-	form := req.PostForm
-	method := form.Get("method")
-	create := form.Get("create") != ""
-	path := form.Get("path")
-	value := form.Get("value")
-	rev := form.Get("rev")
-	revGiven := rev != ""
-
-	if revGiven {
-		e := kv.data[path]
-		if string(e.r) != rev {
-			w.WriteHeader(409)
-			return
+	continuous := req.URL.Query().Get("feed") == "continuous"
+	entries := make([]KVEntry, 0, len(kv.data))
+	for k, e := range kv.data {
+		entries = append(entries, KVEntry{Path: k, Value: e.v, Rev: e.r})
+	}
+	sort.Sort(entriesSlice(entries))
+	enc := json.NewEncoder(w)
+	for _, e := range entries {
+		err := enc.Encode(e)
+		if err != nil {
+			log.Fatal(err)
 		}
 	}
+	if continuous {
+		w.(http.Flusher).Flush()
 
-	switch method {
-	case "get":
-		e, exists := kv.data[path]
-		if !exists {
-			w.Write([]byte("{}"))
-			return
-		}
-		replyJSON(w, map[string][]byte{"value": e.v, "rev": e.r})
-	case "set":
-		if create {
-			if _, exists := kv.data[path]; exists {
-				w.WriteHeader(409)
+		ch := make(chan KVEntry, 16)
+		defer kv.subscribeLocked(ch)()
+
+		kv.l.Unlock()
+		locked = false
+
+		log.Print("Waiting for rows")
+		closed := w.(http.CloseNotifier).CloseNotify()
+
+		for {
+			select {
+			case e := <-ch:
+				log.Printf("Observed {%s, %s, %s}", e.Path, e.Value, e.Rev)
+				err := enc.Encode(e)
+				if err != nil {
+					log.Printf("Got error in subscribe path: %v", err)
+					return
+				}
+				w.(http.Flusher).Flush()
+			case <-closed:
+				log.Print("receiver is dead")
 				return
 			}
 		}
-		kv.setLocked(path, value)
-	case "delete":
-		kv.broadcast(KVEntry{path, nil, nil})
-		delete(kv.data, path)
-	case "iterate":
-		continuous := (form.Get("continuous") == "true")
-		entries := make([]KVEntry, 0, len(kv.data))
-		for k, e := range kv.data {
-			entries = append(entries, KVEntry{Path: k, Value: e.v, Rev: e.r})
-		}
-		sort.Sort(entriesSlice(entries))
-		enc := json.NewEncoder(w)
-		for _, e := range entries {
-			err := enc.Encode(e)
-			if err != nil {
-				log.Fatal(err)
-			}
-		}
-		if continuous {
-			w.(http.Flusher).Flush()
-
-			ch := make(chan KVEntry, 16)
-			defer kv.subscribeLocked(ch)()
-
-			kv.l.Unlock()
-			locked = false
-
-			log.Print("Waiting for rows")
-			closed := w.(http.CloseNotifier).CloseNotify()
-
-			for {
-				select {
-				case e := <-ch:
-					log.Printf("Observed {%s, %s, %s}", e.Path, e.Value, e.Rev)
-					err := enc.Encode(e)
-					if err != nil {
-						log.Printf("Got error in subscribe path: %v", err)
-						return
-					}
-					w.(http.Flusher).Flush()
-				case <-closed:
-					log.Print("receiver is dead")
-					return
-				}
-			}
-		}
-	default:
-		w.WriteHeader(404)
 	}
-}
-
-func (kv *mockKV) postForm(payload url.Values) (resp *http.Response, err error) {
-	u := kv.srv.URL + "/_metakv"
-
-	return http.PostForm(u, payload)
-}
-
-func (kv *mockKV) doCall(payload url.Values, response interface{}) (statusCode int, err error) {
-	resp, err := kv.postForm(payload)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode, json.NewDecoder(resp.Body).Decode(response)
 }
 
 type myT struct{ *testing.T }
@@ -215,20 +226,45 @@ func (t *myT) emptyBody(resp *http.Response, err error) {
 
 func must(t *testing.T) *myT { return &myT{t} }
 
+func (kv *mockKV) fullPath(path string) string {
+	return kv.srv.URL + "/_metakv" + path
+}
+
+func (kv *mockKV) doGet(path string, response interface{}) (statusCode int, err error) {
+	resp, err := http.Get(kv.fullPath(path))
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, json.NewDecoder(resp.Body).Decode(response)
+}
+
+func (kv *mockKV) doPut(path, value string) (resp *http.Response, err error) {
+	values := url.Values{"value": {"foobar"}}
+	body := strings.NewReader(values.Encode())
+	req, err := http.NewRequest("PUT", kv.fullPath(path), body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{}
+	return client.Do(req)
+}
+
 func TestMock(t *testing.T) {
 	kv := &mockKV{}
 	defer kv.runMock()()
 
 	var m map[string]interface{}
-	must(t).okStatus(kv.doCall(url.Values{"method": {"get"}, "path": {"/test"}}, &m))
+	must(t).okStatus(kv.doGet("/test", &m))
 	if len(m) != 0 {
 		t.Fatalf("Expected get against empty kv to return {}")
 	}
 
-	must(t).emptyBody(kv.postForm(url.Values{"method": {"set"}, "path": {"/test"}, "value": {"foobar"}}))
+	must(t).emptyBody(kv.doPut("/test", "foobar"))
 
 	var kve kvEntry
-	must(t).okStatus(kv.doCall(url.Values{"method": {"get"}, "path": {"/test"}}, &kve))
+	must(t).okStatus(kv.doGet("/test", &kve))
 	if string(kve.Value) != "foobar" {
 		t.Fatalf("failed to get expected value (foobar). Got: %s", kve.Value)
 	}
@@ -244,7 +280,7 @@ func TestSanity(t *testing.T) {
 	}
 
 	if err := mockStore.add("/_sanity/garbage", []byte("v"), false); err != nil {
-		t.Log("add failed with: %v", err)
+		t.Logf("add failed with: %v", err)
 	}
 	doExecuteBasicSanityTest(t.Log, mockStore)
 }

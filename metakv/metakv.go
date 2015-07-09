@@ -50,7 +50,7 @@ type Callback func(path string, value []byte, rev interface{}) error
 var RevCreate = &struct{}{}
 
 type store struct {
-	url    string
+	url    *url.URL
 	client *http.Client
 }
 
@@ -60,7 +60,6 @@ func initDefaultStore() *store {
 	c := *http.DefaultClient
 	c.Transport = cbauth.WrapHTTPTransport(http.DefaultTransport, nil)
 
-	storeurl := ""
 	authURL := os.Getenv("CBAUTH_REVRPC_URL")
 	u, err := url.Parse(authURL)
 	if err == nil {
@@ -68,14 +67,28 @@ func initDefaultStore() *store {
 		u.Fragment = ""
 		u.Path = "/_metakv"
 		u.User = nil
-		storeurl = u.String()
 	}
-	return &store{url: storeurl, client: &c}
+	return &store{url: u, client: &c}
 }
 
-func doCallInner(s *store, method string, values url.Values) (resp *http.Response, err error) {
-	values.Set("method", method)
-	r, err := s.client.PostForm(s.url, values)
+func doCallInner(s *store, method, path string, values url.Values) (resp *http.Response, err error) {
+	var body io.Reader
+	if method == "PUT" && values != nil {
+		body = strings.NewReader(values.Encode())
+	}
+	url := *s.url
+	url.Path += path
+	req, err := http.NewRequest(method, url.String(), body)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	if method != "PUT" && values != nil {
+		req.URL.RawQuery = values.Encode()
+	}
+	r, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -88,8 +101,8 @@ func doCallInner(s *store, method string, values url.Values) (resp *http.Respons
 	return r, err
 }
 
-func doCall(s *store, method string, values url.Values) (body []byte, err error) {
-	r, err := doCallInner(s, method, values)
+func doCall(s *store, method, path string, values url.Values) (body []byte, err error) {
+	r, err := doCallInner(s, method, path, values)
 	if err != nil {
 		return nil, err
 	}
@@ -97,8 +110,8 @@ func doCall(s *store, method string, values url.Values) (body []byte, err error)
 	return ioutil.ReadAll(r.Body)
 }
 
-func doJSONCall(s *store, method string, values url.Values, place interface{}) error {
-	body, err := doCall(s, method, values)
+func doJSONCall(s *store, method, path string, values url.Values, place interface{}) error {
+	body, err := doCall(s, method, path, values)
 	if err != nil {
 		return err
 	}
@@ -111,15 +124,22 @@ type kvEntry struct {
 	Rev   []byte
 }
 
-func assertValidPath(path string) {
+func assertValidPathPrefix(path string) {
 	if path[0] != '/' {
 		panic("path must begin with /")
 	}
 }
 
-// Assert path ends with "/"
-func assertValidDirPath(dirpath string) {
-	if !strings.HasSuffix(dirpath, "/") {
+func assertValidPath(path string) {
+	assertValidPathPrefix(path)
+	if strings.HasSuffix(path, "/") {
+		panic("path must not end with \"/\"")
+	}
+}
+
+func assertValidDirPath(path string) {
+	assertValidPathPrefix(path)
+	if !strings.HasSuffix(path, "/") {
 		panic("dirpath must end with \"/\"")
 	}
 }
@@ -129,7 +149,7 @@ func assertValidDirPath(dirpath string) {
 func (s *store) get(path string) (value []byte, rev interface{}, err error) {
 	assertValidPath(path)
 	var kve kvEntry
-	err = doJSONCall(s, "get", url.Values{"path": {path}}, &kve)
+	err = doJSONCall(s, "GET", path, nil, &kve)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -141,10 +161,7 @@ func (s *store) get(path string) (value []byte, rev interface{}, err error) {
 }
 
 func mutate(s *store, method string, path string, value []byte, rev interface{}, create bool, sensitive bool) error {
-	assertValidPath(path)
-
 	values := url.Values{
-		"path":  {path},
 		"value": {string(value)},
 	}
 
@@ -167,7 +184,7 @@ func mutate(s *store, method string, path string, value []byte, rev interface{},
 		values.Set("sensitive", "false")
 	}
 
-	_, err := doCall(s, method, values)
+	_, err := doCall(s, method, path, values)
 	return err
 }
 
@@ -176,24 +193,27 @@ func mutate(s *store, method string, path string, value []byte, rev interface{},
 // read-modify-write cases. Rev is supposed to be same value that is
 // returned from get.
 func (s *store) set(path string, value []byte, rev interface{}, sensitive bool) error {
-	return mutate(s, "set", path, value, rev, false, sensitive)
+	assertValidPath(path)
+	return mutate(s, "PUT", path, value, rev, false, sensitive)
 }
 
 // Add creates given kv pair. Which must not exist in storage
 // yet. ErrRevMismatch is returned if pair with such key exists.
 func (s *store) add(path string, value []byte, sensitive bool) error {
-	return mutate(s, "set", path, value, nil, true, sensitive)
+	assertValidPath(path)
+	return mutate(s, "PUT", path, value, nil, true, sensitive)
 }
 
 // Delete deletes given key.
 func (s *store) delete(path string, rev interface{}) error {
-	return mutate(s, "delete", path, nil, rev, false, false)
+	assertValidPath(path)
+	return mutate(s, "DELETE", path, nil, rev, false, false)
 }
 
 // Recursive Delete deletes all keys that are children of given directory path.
 func (s *store) recursiveDelete(dirpath string) error {
 	assertValidDirPath(dirpath)
-	return mutate(s, "recursive_delete", dirpath, nil, nil, false, false)
+	return mutate(s, "DELETE", dirpath, nil, nil, false, false)
 }
 
 // IterateChildren invokes given callback on every kv-pair that's
@@ -217,15 +237,12 @@ func (s *store) runObserveChildren(dirpath string, callback Callback, cancel <-c
 }
 
 func doRunObserveChildren(s *store, dirpath string, callback Callback, cancel <-chan struct{}) error {
-	assertValidPath(dirpath)
 	assertValidDirPath(dirpath)
-	values := url.Values{"path": {dirpath}}
-	if cancel == nil {
-		values.Set("continuous", "false")
-	} else {
-		values.Set("continuous", "true")
+	values := url.Values{}
+	if cancel != nil {
+		values.Set("feed", "continuous")
 	}
-	r, err := doCallInner(s, "iterate", values)
+	r, err := doCallInner(s, "GET", dirpath, values)
 	if err != nil {
 		return err
 	}
