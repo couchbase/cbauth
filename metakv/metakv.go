@@ -299,7 +299,7 @@ func Set(path string, value []byte, rev interface{}) error {
 	return defaultStore.set(path, value, rev, false)
 }
 
-// Set for storing sensitive info.
+// SetSensitive is Set for storing sensitive info.
 func SetSensitive(path string, value []byte, rev interface{}) error {
 	return defaultStore.set(path, value, rev, true)
 }
@@ -310,7 +310,7 @@ func Add(path string, value []byte) error {
 	return defaultStore.add(path, value, false)
 }
 
-// Add for storing sensitive info.
+// AddSensitive is Add for storing sensitive info.
 func AddSensitive(path string, value []byte) error {
 	return defaultStore.add(path, value, true)
 }
