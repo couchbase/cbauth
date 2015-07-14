@@ -41,6 +41,8 @@ import (
 // rev mismatch
 var ErrRevMismatch = errors.New("Rev mismatch")
 
+var errNotFound = errors.New("Not found")
+
 // Callback type describes functions that receive mutations from
 // RunObserveChildren.
 type Callback func(path string, value []byte, rev interface{}) error
@@ -94,6 +96,9 @@ func doCallInner(s *store, method, path string, values url.Values) (resp *http.R
 	}
 	if r.StatusCode == http.StatusConflict {
 		return nil, ErrRevMismatch
+	}
+	if r.StatusCode == http.StatusNotFound {
+		return nil, errNotFound
 	}
 	if r.StatusCode != 200 {
 		return nil, fmt.Errorf("ns_server _metakv returned: %s", r.Status)
@@ -150,6 +155,9 @@ func (s *store) get(path string) (value []byte, rev interface{}, err error) {
 	assertValidPath(path)
 	var kve kvEntry
 	err = doJSONCall(s, "GET", path, nil, &kve)
+	if err == errNotFound {
+		return nil, nil, nil
+	}
 	if err != nil {
 		return nil, nil, err
 	}
