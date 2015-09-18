@@ -101,13 +101,13 @@ func (rt *testingRoundTripper) RoundTrip(req *http.Request) (res *http.Response,
 
 	statusCode := 200
 
-	if req.Header.Get("ns_server-ui") == "yes" {
+	if req.Header.Get("ns-server-ui") == "yes" {
 		token, err := req.Cookie("ui-auth-q")
 		if err != nil || rt.token != token.Value {
 			statusCode = 401
 		}
 	} else {
-		log.Fatal("Expect to be called only with ns_server-ui=yes")
+		log.Fatal("Expect to be called only with ns-server-ui=yes")
 	}
 
 	response := ""
@@ -375,7 +375,7 @@ func TestTokenAdmin(t *testing.T) {
 	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
 	must(err)
 	req.Header.Set("Cookie", "ui-auth-q=1234567890")
-	req.Header.Set("ns_server-ui", "yes")
+	req.Header.Set("ns-server-ui", "yes")
 
 	c, err := a.AuthWebCreds(req)
 	must(err)

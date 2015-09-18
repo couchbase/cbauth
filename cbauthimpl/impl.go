@@ -321,10 +321,10 @@ func fetchDB(s *Svc) *credsDB {
 	return db
 }
 
-const tokenHeader = "ns_server-ui"
+const tokenHeader = "ns-server-ui"
 
 // IsAuthTokenPresent returns true iff ns_server's ui token header
-// ("ns_server-ui") is set to "yes". UI is using that header to
+// ("ns-server-ui") is set to "yes". UI is using that header to
 // indicate that request is using so called token auth.
 func IsAuthTokenPresent(req *http.Request) bool {
 	return req.Header.Get(tokenHeader) == "yes"
@@ -354,7 +354,7 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	}
 
 	copyHeader(tokenHeader, reqHeaders, req.Header)
-	copyHeader("Ns_server-Auth-Token", reqHeaders, req.Header)
+	copyHeader("ns-server-auth-token", reqHeaders, req.Header)
 	copyHeader("Cookie", reqHeaders, req.Header)
 	copyHeader("Authorization", reqHeaders, req.Header)
 
