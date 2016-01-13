@@ -144,8 +144,15 @@ func doAuth(a *authImpl, user, pwd string, hdr http.Header) (Creds, error) {
 		return NoAccessCreds, nil
 	}
 
-	// TODO: consider short-cutting this when we know that
-	// ldap auth is not configured
+	ldapEnabled, err := cbauthimpl.IsLDAPEnabled(a.svc)
+	if err != nil {
+		return nil, err
+	}
+
+	if !ldapEnabled {
+		return nil, nil
+	}
+
 	if hdr == nil {
 		req, err := http.NewRequest("GET", "http://host/", nil)
 		if err != nil {

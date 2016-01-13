@@ -93,6 +93,7 @@ type credsDB struct {
 	authCheckURL    string
 	specialUser     string
 	specialPassword string
+	ldapEnabled     bool
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
@@ -103,6 +104,7 @@ type Cache struct {
 	ROAdmin      User   `json:"roAdmin"`
 	AuthCheckURL string `json:"authCheckUrl"`
 	SpecialUser  string `json:"specialUser"`
+	LDAPEnabled  bool
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -213,6 +215,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		roadmin:        c.ROAdmin,
 		hasNoPwdBucket: false,
 		authCheckURL:   c.AuthCheckURL,
+		ldapEnabled:    c.LDAPEnabled,
 		specialUser:    c.SpecialUser,
 	}
 	for _, bucket := range c.Buckets {
@@ -334,6 +337,16 @@ func copyHeader(name string, from, to http.Header) {
 	if val := from.Get(name); val != "" {
 		to.Set(name, val)
 	}
+}
+
+// IsLDAPEnabled returns true if ldap authentication is enabled
+// on ns_server
+func IsLDAPEnabled(s *Svc) (bool, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return false, staleError(s)
+	}
+	return s.db.ldapEnabled, nil
 }
 
 // VerifyOnServer verifies auth of given request by passing it to
