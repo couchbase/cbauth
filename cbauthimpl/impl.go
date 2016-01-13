@@ -90,19 +90,19 @@ type credsDB struct {
 	admin           User
 	roadmin         User
 	hasNoPwdBucket  bool
-	tokenCheckURL   string
+	authCheckURL    string
 	specialUser     string
 	specialPassword string
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
 type Cache struct {
-	Nodes         []Node
-	Buckets       []Bucket
-	Admin         User
-	ROAdmin       User   `json:"roAdmin"`
-	TokenCheckURL string `json:"tokenCheckUrl"`
-	SpecialUser   string `json:"specialUser"`
+	Nodes        []Node
+	Buckets      []Bucket
+	Admin        User
+	ROAdmin      User   `json:"roAdmin"`
+	AuthCheckURL string `json:"authCheckUrl"`
+	SpecialUser  string `json:"specialUser"`
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -212,7 +212,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		admin:          c.Admin,
 		roadmin:        c.ROAdmin,
 		hasNoPwdBucket: false,
-		tokenCheckURL:  c.TokenCheckURL,
+		authCheckURL:   c.AuthCheckURL,
 		specialUser:    c.SpecialUser,
 	}
 	for _, bucket := range c.Buckets {
@@ -344,11 +344,11 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 		return nil, staleError(s)
 	}
 
-	if s.db.tokenCheckURL == "" {
+	if s.db.authCheckURL == "" {
 		return nil, nil
 	}
 
-	req, err := http.NewRequest("POST", db.tokenCheckURL, nil)
+	req, err := http.NewRequest("POST", db.authCheckURL, nil)
 	if err != nil {
 		panic(err)
 	}
