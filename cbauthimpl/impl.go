@@ -117,19 +117,6 @@ type CredsImpl struct {
 	db        *credsDB
 }
 
-func credsFromUserRoleSource(user, role, source string, db *credsDB) *CredsImpl {
-	rv := CredsImpl{name: user, source: source, db: db}
-	switch role {
-	case "admin":
-		rv.isAdmin = true
-	case "ro_admin":
-		rv.isROAdmin = true
-	default:
-		panic("unknown role: " + role)
-	}
-	return &rv
-}
-
 // Name method returns user name (e.g. for auditing)
 func (c *CredsImpl) Name() string {
 	return c.name
@@ -391,14 +378,16 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	}
 
 	resp := struct {
-		Role, User, Source string
+		User, Source string
 	}{}
 	err = json.Unmarshal(body, &resp)
 	if err != nil {
 		return nil, err
 	}
 
-	return credsFromUserRoleSource(resp.User, resp.Role, resp.Source, db), nil
+	rv := CredsImpl{name: resp.User, source: resp.Source, db: db}
+	rv.isAdmin = true
+	return &rv, nil
 }
 
 // VerifyPassword verifies given user/password creds against cbauth
