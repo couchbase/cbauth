@@ -85,26 +85,28 @@ func verifyCreds(u User, user, password string) bool {
 }
 
 type credsDB struct {
-	nodes           []Node
-	buckets         map[string]string
-	admin           User
-	roadmin         User
-	hasNoPwdBucket  bool
-	authCheckURL    string
-	specialUser     string
-	specialPassword string
-	ldapEnabled     bool
+	nodes              []Node
+	buckets            map[string]string
+	admin              User
+	roadmin            User
+	hasNoPwdBucket     bool
+	authCheckURL       string
+	permissionCheckURL string
+	specialUser        string
+	specialPassword    string
+	ldapEnabled        bool
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
 type Cache struct {
-	Nodes        []Node
-	Buckets      []Bucket
-	Admin        User
-	ROAdmin      User   `json:"roAdmin"`
-	AuthCheckURL string `json:"authCheckUrl"`
-	SpecialUser  string `json:"specialUser"`
-	LDAPEnabled  bool
+	Nodes              []Node
+	Buckets            []Bucket
+	Admin              User
+	ROAdmin            User   `json:"roAdmin"`
+	AuthCheckURL       string `json:"authCheckUrl"`
+	PermissionCheckURL string `json:"permissionCheckUrl"`
+	SpecialUser        string `json:"specialUser"`
+	LDAPEnabled        bool
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -198,14 +200,15 @@ type Svc struct {
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
 	db = &credsDB{
-		nodes:          c.Nodes,
-		buckets:        make(map[string]string),
-		admin:          c.Admin,
-		roadmin:        c.ROAdmin,
-		hasNoPwdBucket: false,
-		authCheckURL:   c.AuthCheckURL,
-		ldapEnabled:    c.LDAPEnabled,
-		specialUser:    c.SpecialUser,
+		nodes:              c.Nodes,
+		buckets:            make(map[string]string),
+		admin:              c.Admin,
+		roadmin:            c.ROAdmin,
+		hasNoPwdBucket:     false,
+		authCheckURL:       c.AuthCheckURL,
+		permissionCheckURL: c.PermissionCheckURL,
+		ldapEnabled:        c.LDAPEnabled,
+		specialUser:        c.SpecialUser,
 	}
 	for _, bucket := range c.Buckets {
 		if bucket.Password == "" {
