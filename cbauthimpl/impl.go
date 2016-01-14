@@ -109,12 +109,10 @@ type Cache struct {
 
 // CredsImpl implements cbauth.Creds interface.
 type CredsImpl struct {
-	name      string
-	source    string
-	isAdmin   bool
-	isROAdmin bool
-	password  string
-	db        *credsDB
+	name     string
+	source   string
+	password string
+	db       *credsDB
 }
 
 // Name method returns user name (e.g. for auditing)
@@ -124,13 +122,17 @@ func (c *CredsImpl) Name() string {
 
 // Source method returns user source (for auditing)
 func (c *CredsImpl) Source() string {
+	switch c.source {
+	case "admin", "ro_admin":
+		return "ns_server"
+	}
 	return c.source
 }
 
 // IsAdmin method returns true iff this creds represent valid
 // admin account.
 func (c *CredsImpl) IsAdmin() (bool, error) {
-	return c.isAdmin, nil
+	return c.source == "admin", nil
 }
 
 // IsROAdmin method returns true iff this creds represent valid
@@ -142,7 +144,7 @@ func (c *CredsImpl) IsROAdmin() (bool, error) {
 // CanReadAnyMetadata method returns true iff this creds represents
 // admin or ro-admin account.
 func (c *CredsImpl) CanReadAnyMetadata() bool {
-	return c.isROAdmin || c.isAdmin
+	return c.source == "admin" || c.source == "ro_admin"
 }
 
 func verifySpecialCreds(db *credsDB, user, password string) bool {
@@ -162,7 +164,7 @@ func checkBucketPassword(db *credsDB, bucket, givenPassword string) bool {
 // represent valid account that can read/write/query docs in given
 // bucket.
 func (c *CredsImpl) CanAccessBucket(bucket string) (bool, error) {
-	if c.isAdmin {
+	if c.source == "admin" {
 		return true, nil
 	}
 	if c.name != "" && c.name != bucket {
@@ -386,7 +388,6 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	}
 
 	rv := CredsImpl{name: resp.User, source: resp.Source, db: db}
-	rv.isAdmin = true
 	return &rv, nil
 }
 
@@ -398,15 +399,15 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	if db == nil {
 		return nil, staleError(s)
 	}
-	rv := &CredsImpl{name: user, source: "ns_server", password: password, db: db}
+	rv := &CredsImpl{name: user, password: password, db: db}
 
 	switch {
 	case verifySpecialCreds(db, user, password):
-		rv.isAdmin = true
+		rv.source = "admin"
 	case verifyCreds(db.admin, user, password):
-		rv.isAdmin = true
+		rv.source = "admin"
 	case verifyCreds(db.roadmin, user, password):
-		rv.isROAdmin = true
+		rv.source = "ro_admin"
 	case user == "":
 		if !(password == "" && db.hasNoPwdBucket) {
 			// we only allow anonymous access if password
@@ -414,6 +415,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 			// no-password bucket
 			return nil, nil
 		}
+		rv.source = "anonymous"
 	default:
 		if !checkBucketPassword(db, user, password) {
 			// right now we only grant access if username
@@ -421,6 +423,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 			// is given
 			return nil, nil
 		}
+		rv.source = "bucket"
 	}
 
 	return rv, nil
