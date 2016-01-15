@@ -133,7 +133,7 @@ func (c *CredsImpl) Name() string {
 	return c.name
 }
 
-// Name method returns user source (for auditing)
+// Source method returns user source (for auditing)
 func (c *CredsImpl) Source() string {
 	return c.source
 }
