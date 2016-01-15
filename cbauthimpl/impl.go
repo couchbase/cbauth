@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 )
@@ -115,6 +116,7 @@ type CredsImpl struct {
 	source   string
 	password string
 	db       *credsDB
+	s        *Svc
 }
 
 // Name method returns user name (e.g. for auditing)
@@ -129,6 +131,12 @@ func (c *CredsImpl) Source() string {
 		return "ns_server"
 	}
 	return c.source
+}
+
+// IsAllowed method returns true if the permission is granted
+// for these credentials
+func (c *CredsImpl) IsAllowed(permission string) (bool, error) {
+	return checkPermissionOnServer(c.s, c.name, c.source, permission)
 }
 
 // IsAdmin method returns true iff this creds represent valid
@@ -390,8 +398,41 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 		return nil, err
 	}
 
-	rv := CredsImpl{name: resp.User, source: resp.Source, db: db}
+	rv := CredsImpl{name: resp.User, source: resp.Source, db: db, s: s}
 	return &rv, nil
+}
+
+func checkPermissionOnServer(s *Svc, user, source, permission string) (bool, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return false, staleError(s)
+	}
+
+	req, err := http.NewRequest("GET", db.permissionCheckURL, nil)
+	if err != nil {
+		return false, err
+	}
+	req.SetBasicAuth(db.specialUser, db.specialPassword)
+
+	v := url.Values{}
+	v.Set("user", user)
+	v.Set("src", source)
+	v.Set("permission", permission)
+	req.URL.RawQuery = v.Encode()
+
+	hresp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer hresp.Body.Close()
+
+	switch hresp.StatusCode {
+	case 200:
+		return true, nil
+	case 401:
+		return false, nil
+	}
+	return false, fmt.Errorf("Unexpected return code %v", hresp.StatusCode)
 }
 
 // VerifyPassword verifies given user/password creds against cbauth
@@ -402,7 +443,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	if db == nil {
 		return nil, staleError(s)
 	}
-	rv := &CredsImpl{name: user, password: password, db: db}
+	rv := &CredsImpl{name: user, password: password, db: db, s: s}
 
 	switch {
 	case verifySpecialCreds(db, user, password):

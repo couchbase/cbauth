@@ -55,6 +55,9 @@ type Creds interface {
 	Name() string
 	// Source method returns user source (for auditing)
 	Source() string
+	// IsAllowed method returns true if the permission is granted
+	// for these credentials
+	IsAllowed(permission string) (bool, error)
 	// IsAdmin method returns true iff this creds represent valid
 	// admin account.
 	IsAdmin() (bool, error)
@@ -85,6 +88,7 @@ type naCreds struct{}
 
 func (na naCreds) Name() string                                { return "" }
 func (na naCreds) Source() string                              { return "" }
+func (na naCreds) IsAllowed(permission string) (bool, error)   { return false, nil }
 func (na naCreds) IsAdmin() (bool, error)                      { return false, nil }
 func (na naCreds) IsROAdmin() (bool, error)                    { return false, nil }
 func (na naCreds) CanReadAnyMetadata() bool                    { return false }
