@@ -95,6 +95,7 @@ type credsDB struct {
 	permissionCheckURL string
 	specialUser        string
 	specialPassword    string
+	permissionsVersion int
 	ldapEnabled        bool
 }
 
@@ -107,6 +108,7 @@ type Cache struct {
 	AuthCheckURL       string `json:"authCheckUrl"`
 	PermissionCheckURL string `json:"permissionCheckUrl"`
 	SpecialUser        string `json:"specialUser"`
+	PermissionsVersion int
 	LDAPEnabled        bool
 }
 
@@ -136,7 +138,7 @@ func (c *CredsImpl) Source() string {
 // IsAllowed method returns true if the permission is granted
 // for these credentials
 func (c *CredsImpl) IsAllowed(permission string) (bool, error) {
-	return checkPermissionOnServer(c.s, c.name, c.source, permission)
+	return checkPermission(c.s, c.name, c.source, permission)
 }
 
 // IsAdmin method returns true iff this creds represent valid
@@ -204,6 +206,7 @@ type Svc struct {
 	db        *credsDB
 	staleErr  error
 	freshChan chan struct{}
+	upCache   *userPermissionCache
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -217,6 +220,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		permissionCheckURL: c.PermissionCheckURL,
 		ldapEnabled:        c.LDAPEnabled,
 		specialUser:        c.SpecialUser,
+		permissionsVersion: c.PermissionsVersion,
 	}
 	for _, bucket := range c.Buckets {
 		if bucket.Password == "" {
@@ -402,12 +406,34 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	return &rv, nil
 }
 
-func checkPermissionOnServer(s *Svc, user, source, permission string) (bool, error) {
+func checkPermission(s *Svc, user, source, permission string) (bool, error) {
 	db := fetchDB(s)
 	if db == nil {
 		return false, staleError(s)
 	}
 
+	s.l.Lock()
+	if s.upCache == nil {
+		s.upCache = newPermissionCache(db.permissionsVersion)
+	}
+	s.l.Unlock()
+
+	s.upCache.maybeRefreshCache(db.permissionsVersion)
+
+	allowed, found := s.upCache.lookup(user, source, permission)
+	if found {
+		return allowed, nil
+	}
+
+	allowed, err := checkPermissionOnServer(db, user, source, permission)
+	if err != nil {
+		return false, err
+	}
+	s.upCache.set(user, source, permission, allowed, db.permissionsVersion)
+	return allowed, nil
+}
+
+func checkPermissionOnServer(db *credsDB, user, source, permission string) (bool, error) {
 	req, err := http.NewRequest("GET", db.permissionCheckURL, nil)
 	if err != nil {
 		return false, err
@@ -489,4 +515,51 @@ func GetCreds(s *Svc, host string, port int) (memcachedUser, user, pwd string, e
 		}
 	}
 	return
+}
+
+type userPermission struct {
+	user       string
+	src        string
+	permission string
+}
+
+type userPermissionCache struct {
+	sync.RWMutex
+	version int
+	m       map[userPermission]bool
+}
+
+func (c *userPermissionCache) clearNoLock() {
+	c.m = make(map[userPermission]bool)
+}
+
+func (c *userPermissionCache) maybeRefreshCache(version int) {
+	c.Lock()
+	if c.version != version {
+		c.clearNoLock()
+		c.version = version
+	}
+	c.Unlock()
+}
+
+func newPermissionCache(version int) (c *userPermissionCache) {
+	c = new(userPermissionCache)
+	c.clearNoLock()
+	c.version = version
+	return
+}
+
+func (c *userPermissionCache) lookup(user, src, permission string) (allowed, found bool) {
+	c.RLock()
+	allowed, found = c.m[userPermission{user, src, permission}]
+	c.RUnlock()
+	return
+}
+
+func (c *userPermissionCache) set(user, src, permission string, allowed bool, version int) {
+	c.Lock()
+	if c.version == version {
+		c.m[userPermission{user, src, permission}] = allowed
+	}
+	c.Unlock()
 }
