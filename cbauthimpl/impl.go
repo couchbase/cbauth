@@ -207,6 +207,7 @@ type Svc struct {
 	staleErr  error
 	freshChan chan struct{}
 	upCache   *userPermissionCache
+	cacheOnce sync.Once
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -412,11 +413,7 @@ func checkPermission(s *Svc, user, source, permission string) (bool, error) {
 		return false, staleError(s)
 	}
 
-	s.l.Lock()
-	if s.upCache == nil {
-		s.upCache = newPermissionCache(db.permissionsVersion)
-	}
-	s.l.Unlock()
+	s.cacheOnce.Do(func() { s.upCache = newPermissionCache(db.permissionsVersion) })
 
 	s.upCache.maybeRefreshCache(db.permissionsVersion)
 
