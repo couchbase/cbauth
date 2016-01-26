@@ -154,7 +154,7 @@ func doAuth(a *authImpl, user, pwd string, hdr http.Header) (Creds, error) {
 	}
 
 	if !ldapEnabled {
-		return nil, nil
+		return NoAccessCreds, nil
 	}
 
 	if hdr == nil {
