@@ -239,7 +239,7 @@ func doTestStaleThenAdmin(t *testing.T, updateBeforeTimer bool) {
 	}
 
 	cred, err = a.Auth("admin", "badpass")
-	if err != nil || cred != NoAccessCreds {
+	if err != ErrNoAuth {
 		t.Fatalf("badpass must not work. Instead got: %v and %v", cred, err)
 	}
 
@@ -284,7 +284,7 @@ func TestBucketsAuth(t *testing.T) {
 	assertAdmins(t, c, false, false)
 
 	c, err = a.Auth("foo", "notbar")
-	if err != nil || c != NoAccessCreds {
+	if err != ErrNoAuth {
 		t.Fatalf("Expect wrong password auth to fail. Got: %v and %v", c, err)
 	}
 
@@ -310,7 +310,7 @@ func TestBucketsAuth(t *testing.T) {
 	}
 	// and no password access should not work
 	c, err = a.Auth("", "")
-	if err != nil || c != NoAccessCreds {
+	if err != ErrNoAuth {
 		t.Fatalf("Expect no password access to fail after deletion of default bucket. Got: %v and %v", c, err)
 	}
 }

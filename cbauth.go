@@ -17,6 +17,7 @@
 package cbauth
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -84,23 +85,6 @@ type Creds interface {
 
 var _ Creds = (*cbauthimpl.CredsImpl)(nil)
 
-type naCreds struct{}
-
-func (na naCreds) Name() string                                { return "" }
-func (na naCreds) Source() string                              { return "" }
-func (na naCreds) IsAllowed(permission string) (bool, error)   { return false, nil }
-func (na naCreds) IsAdmin() (bool, error)                      { return false, nil }
-func (na naCreds) IsROAdmin() (bool, error)                    { return false, nil }
-func (na naCreds) CanReadAnyMetadata() bool                    { return false }
-func (na naCreds) CanAccessBucket(bucket string) (bool, error) { return false, nil }
-func (na naCreds) CanReadBucket(bucket string) (bool, error)   { return false, nil }
-func (na naCreds) CanDDLBucket(bucket string) (bool, error)    { return false, nil }
-
-// NoAccessCreds is Creds instance that has no access at
-// all. Authenticator returns this Creds instance for incoming auth
-// that was not recognized at all as valid user.
-var NoAccessCreds Creds = naCreds{}
-
 type authImpl struct {
 	svc *cbauthimpl.Svc
 }
@@ -118,6 +102,10 @@ func (e *DBStaleError) Error() string {
 	return "CBAuth database is stale. Was never updated yet."
 }
 
+// ErrNoAuth is an error that is returned when the user credentials
+// are not recognized
+var ErrNoAuth = errors.New("Authentication failure.")
+
 // UnknownHostPortError is returned from GetMemcachedServiceAuth and
 // GetHTTPServiceAuth calls for unknown host:port arguments.
 type UnknownHostPortError string
@@ -129,7 +117,7 @@ func (s UnknownHostPortError) Error() string {
 func doOnServer(s *cbauthimpl.Svc, hdr http.Header) (Creds, error) {
 	rv, err := cbauthimpl.VerifyOnServer(s, hdr)
 	if rv == nil && err == nil {
-		return NoAccessCreds, nil
+		return nil, ErrNoAuth
 	}
 	return rv, err
 }
@@ -145,7 +133,7 @@ func doAuth(a *authImpl, user, pwd string, hdr http.Header) (Creds, error) {
 	}
 
 	if user == "" {
-		return NoAccessCreds, nil
+		return nil, ErrNoAuth
 	}
 
 	ldapEnabled, err := cbauthimpl.IsLDAPEnabled(a.svc)
@@ -154,7 +142,7 @@ func doAuth(a *authImpl, user, pwd string, hdr http.Header) (Creds, error) {
 	}
 
 	if !ldapEnabled {
-		return NoAccessCreds, nil
+		return nil, ErrNoAuth
 	}
 
 	if hdr == nil {
