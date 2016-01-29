@@ -16,6 +16,7 @@
 package cbauth
 
 import (
+	"encoding/json"
 	"net/http"
 )
 
@@ -88,4 +89,26 @@ func WrapHTTPTransport(transport http.RoundTripper, a Authenticator) http.RoundT
 func SendUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", "Basic realm=\"Couchbase\"")
 	http.Error(w, "need auth", http.StatusUnauthorized)
+}
+
+// ForbiddenJson returns json 403 response for given permission
+func ForbiddenJson(permission string) ([]byte, error) {
+	jsonStruct := map[string]interface{}{
+		"message":     "Forbidden. User needs one of the following permissions",
+		"permissions": [...]string{permission},
+	}
+	return json.Marshal(jsonStruct)
+}
+
+// SendForbidden sends 403 Forbidden with json payload that contains list
+// of required permissions to response on given response writer.
+func SendForbidden(w http.ResponseWriter, permission string) error {
+	b, err := ForbiddenJson(permission)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	w.Write(b)
+	return nil
 }
