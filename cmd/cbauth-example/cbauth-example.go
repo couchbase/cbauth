@@ -146,40 +146,53 @@ func recogniseBucket(req *http.Request) (bucket string) {
 	return
 }
 
-func doServeBucket(w http.ResponseWriter, req *http.Request) (err error) {
-	log.Printf("Serving: %s %s", req.Method, req.RequestURI)
-	if req.Method != "GET" {
-		http.NotFound(w, req)
-		return
-	}
-
-	bucket := recogniseBucket(req)
-	if bucket == "" {
-		http.NotFound(w, req)
-		return
-	}
-
+func authAndPerformBucketRequest(w http.ResponseWriter, req *http.Request, bucket, baseURL string) (err error) {
 	creds, err := cbauth.AuthWebCreds(req)
-	if err != nil {
-		return
-	}
-	log.Printf("User name: `%s'", creds.Name())
-	canAccess, err := creds.CanAccessBucket(bucket)
-	if err != nil {
-		return
-	}
-	if !canAccess {
+
+	if err == cbauth.ErrNoAuth {
 		cbauth.SendUnauthorized(w)
 		return
 	}
 
-	payload, err := performBucketRequest(bucket, mgmtURLFlag)
+	if err != nil {
+		return
+	}
+	log.Printf("User name: `%s'", creds.Name())
+
+	permission := "cluster.bucket[" + bucket + "].settings!read"
+
+	canAccess, err := creds.IsAllowed(permission)
+	if err != nil {
+		log.Printf("Err: %v", err)
+		return
+	}
+	if !canAccess {
+		cbauth.SendForbidden(w, permission)
+		return
+	}
+
+	payload, err := performBucketRequest(bucket, baseURL)
 	if err != nil {
 		return
 	}
 
 	w.Write(payload)
 	return
+}
+
+func doServeBucket(w http.ResponseWriter, req *http.Request) error {
+	log.Printf("Serving: %s %s", req.Method, req.RequestURI)
+	if req.Method != "GET" {
+		http.NotFound(w, req)
+		return nil
+	}
+
+	bucket := recogniseBucket(req)
+	if bucket == "" {
+		http.NotFound(w, req)
+		return nil
+	}
+	return authAndPerformBucketRequest(w, req, bucket, mgmtURLFlag)
 }
 
 func recogniseHostBucket(req *http.Request) (host, bucket string) {
@@ -193,40 +206,19 @@ func recogniseHostBucket(req *http.Request) (host, bucket string) {
 	return
 }
 
-func doServeHostBucket(w http.ResponseWriter, req *http.Request) (err error) {
+func doServeHostBucket(w http.ResponseWriter, req *http.Request) error {
 	log.Printf("Serving: %s %s", req.Method, req.RequestURI)
 	if req.Method != "GET" {
 		http.NotFound(w, req)
-		return
+		return nil
 	}
 
 	host, bucket := recogniseHostBucket(req)
 	if bucket == "" || host == "" {
 		http.NotFound(w, req)
-		return
+		return nil
 	}
-
-	creds, err := cbauth.AuthWebCreds(req)
-	if err != nil {
-		return
-	}
-	log.Printf("User name: `%s'", creds.Name())
-	canAccess, err := creds.CanAccessBucket(bucket)
-	if err != nil {
-		return
-	}
-	if !canAccess {
-		cbauth.SendUnauthorized(w)
-		return
-	}
-
-	payload, err := performBucketRequest(bucket, "http://"+host+"/")
-	if err != nil {
-		return
-	}
-
-	w.Write(payload)
-	return
+	return authAndPerformBucketRequest(w, req, bucket, "http://"+host+"/")
 }
 
 var serveBucket = servingWithError(doServeBucket)
