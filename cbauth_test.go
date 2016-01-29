@@ -69,17 +69,18 @@ func assertAdmins(t *testing.T, c Creds, needAdmin, needROAdmin bool) {
 }
 
 type testingRoundTripper struct {
+	t       *testing.T
 	method  string
 	url     string
 	user    string
 	source  string
 	token   string
-	role    string
 	tripped bool
 }
 
-func newTestingRT(method, uri string) *testingRoundTripper {
+func newTestingRT(t *testing.T, method, uri string) *testingRoundTripper {
 	return &testingRoundTripper{
+		t:      t,
 		method: method,
 		url:    uri,
 	}
@@ -113,7 +114,7 @@ func (rt *testingRoundTripper) RoundTrip(req *http.Request) (res *http.Response,
 	response := ""
 	status := "401 Unauthorized"
 	if statusCode == 200 {
-		response = fmt.Sprintf(`{"role": "%s", "user": "%s", "source": "%s"}`, rt.role, rt.user, rt.source)
+		response = fmt.Sprintf(`{"user": "%s", "source": "%s"}`, rt.user, rt.source)
 		status = "200 OK"
 	}
 
@@ -143,11 +144,10 @@ func (rt *testingRoundTripper) assertTripped(t *testing.T, expected bool) {
 	}
 }
 
-func (rt *testingRoundTripper) setTokenAuth(user, source, token, role string) {
+func (rt *testingRoundTripper) setTokenAuth(user, source, token string) {
 	rt.token = token
 	rt.source = source
 	rt.user = user
-	rt.role = role
 }
 
 func TestStaleBasic(t *testing.T) {
@@ -364,13 +364,13 @@ func overrideDefClient(c *http.Client) func() {
 func TestTokenAdmin(t *testing.T) {
 	url := "http://127.0.0.1:9000/_auth"
 
-	tr := newTestingRT("POST", url)
-	tr.setTokenAuth("Administrator", "saslauthd", "1234567890", "admin")
+	tr := newTestingRT(t, "POST", url)
+	tr.setTokenAuth("Administrator", "admin", "1234567890")
 
 	defer overrideDefClient(&http.Client{Transport: tr})()
 
 	a := newAuth(0)
-	must(a.svc.UpdateDB(&cbauthimpl.Cache{TokenCheckURL: url}, nil))
+	must(a.svc.UpdateDB(&cbauthimpl.Cache{AuthCheckURL: url}, nil))
 
 	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
 	must(err)
@@ -387,8 +387,8 @@ func TestTokenAdmin(t *testing.T) {
 		t.Errorf("Expect name to be Administrator")
 	}
 
-	if c.Source() != "saslauthd" {
-		t.Errorf("Expect source to be saslauthd. Got %s", c.Source())
+	if c.Source() != "ns_server" {
+		t.Errorf("Expect source to be ns_server. Got %s", c.Source())
 	}
 
 	if !acc(c.CanAccessBucket("asdasdasdasd")) {
