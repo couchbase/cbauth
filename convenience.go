@@ -91,8 +91,8 @@ func SendUnauthorized(w http.ResponseWriter) {
 	http.Error(w, "need auth", http.StatusUnauthorized)
 }
 
-// ForbiddenJson returns json 403 response for given permission
-func ForbiddenJson(permission string) ([]byte, error) {
+// ForbiddenJSON returns json 403 response for given permission
+func ForbiddenJSON(permission string) ([]byte, error) {
 	jsonStruct := map[string]interface{}{
 		"message":     "Forbidden. User needs one of the following permissions",
 		"permissions": [...]string{permission},
@@ -103,7 +103,7 @@ func ForbiddenJson(permission string) ([]byte, error) {
 // SendForbidden sends 403 Forbidden with json payload that contains list
 // of required permissions to response on given response writer.
 func SendForbidden(w http.ResponseWriter, permission string) error {
-	b, err := ForbiddenJson(permission)
+	b, err := ForbiddenJSON(permission)
 	if err != nil {
 		return err
 	}
