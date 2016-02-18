@@ -249,7 +249,7 @@ func BabysitService(setupBody ServiceSetupCallback, svc *Service, errorPolicy Ba
 func doGetServiceFromEnv(serviceName string) (*Service, error) {
 	rurl := os.Getenv("CBAUTH_REVRPC_URL")
 	if rurl == "" {
-		return nil, fmt.Errorf("cbauth environment variable "+
+		return nil, fmt.Errorf("cbauth environment variable " +
 			"CBAUTH_REVRPC_URL is not set")
 	}
 

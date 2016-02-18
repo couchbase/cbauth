@@ -25,8 +25,8 @@ type SASLDAuth struct{}
 
 // AuthReq is struct used by request of SASLDAuth.Check
 type AuthReq struct {
-	User string
-	Password  string
+	User     string
+	Password string
 }
 
 // Check method verifies given creds.
