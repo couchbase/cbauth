@@ -18,7 +18,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/couchbase/cbauth/service_api"
+	"github.com/couchbase/cbauth/service"
 )
 
 func main() {
@@ -30,6 +30,6 @@ func main() {
 		log.Fatalf("need node-id")
 	}
 
-	InitNode(service_api.NodeID(*node), *host)
+	InitNode(service.NodeID(*node), *host)
 	RegisterManager()
 }

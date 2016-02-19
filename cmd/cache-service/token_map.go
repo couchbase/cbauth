@@ -22,7 +22,7 @@ import (
 	"sort"
 
 	"github.com/couchbase/cbauth/metakv"
-	"github.com/couchbase/cbauth/service_api"
+	"github.com/couchbase/cbauth/service"
 )
 
 const (
@@ -34,7 +34,7 @@ const (
 
 type Token struct {
 	Point  uint32
-	Server service_api.NodeID
+	Server service.NodeID
 }
 
 type TokenList []Token
@@ -52,7 +52,7 @@ func (tl TokenList) Swap(i, j int) {
 }
 
 type TokenMap struct {
-	Servers []service_api.NodeID
+	Servers []service.NodeID
 	Tokens  TokenList
 }
 
@@ -68,13 +68,13 @@ func MaybeCreateInitialTokenMap() {
 
 	log.Printf("No token map found. Creating initial one.")
 
-	tm.Servers = []service_api.NodeID{}
+	tm.Servers = []service.NodeID{}
 	tm.Tokens = TokenList{}
 
 	tm.save()
 }
 
-func (tm TokenMap) UpdateServers(newServers []service_api.NodeID) {
+func (tm TokenMap) UpdateServers(newServers []service.NodeID) {
 	removed := serversMap(tm.Servers)
 	added := serversMap(newServers)
 
@@ -99,14 +99,14 @@ func (tm TokenMap) UpdateServers(newServers []service_api.NodeID) {
 		newTokens = append(newTokens, createTokens(addedServer)...)
 	}
 
-	tm.Servers = append([]service_api.NodeID{}, newServers...)
+	tm.Servers = append([]service.NodeID{}, newServers...)
 	tm.Tokens = newTokens
 
 	sort.Sort(tm.Tokens)
 	tm.save()
 }
 
-func (tm TokenMap) FindOwner(key string) service_api.NodeID {
+func (tm TokenMap) FindOwner(key string) service.NodeID {
 	h := hash(key)
 
 	numTokens := len(tm.Tokens)
@@ -125,7 +125,7 @@ func (tm TokenMap) FindOwner(key string) service_api.NodeID {
 func (tm TokenMap) Copy() *TokenMap {
 	cp := &TokenMap{}
 
-	cp.Servers = append([]service_api.NodeID{}, tm.Servers...)
+	cp.Servers = append([]service.NodeID{}, tm.Servers...)
 	cp.Tokens = append(TokenList{}, tm.Tokens...)
 
 	return cp
@@ -135,7 +135,7 @@ func hash(key string) uint32 {
 	return crc32.ChecksumIEEE([]byte(key))
 }
 
-func createTokens(node service_api.NodeID) TokenList {
+func createTokens(node service.NodeID) TokenList {
 	tokens := TokenList(nil)
 
 	for i := 0; i < TokensPerNode; i++ {
@@ -145,8 +145,8 @@ func createTokens(node service_api.NodeID) TokenList {
 	return tokens
 }
 
-func serversMap(servers []service_api.NodeID) map[service_api.NodeID]struct{} {
-	m := make(map[service_api.NodeID]struct{})
+func serversMap(servers []service.NodeID) map[service.NodeID]struct{} {
+	m := make(map[service.NodeID]struct{})
 
 	for _, server := range servers {
 		m[server] = struct{}{}

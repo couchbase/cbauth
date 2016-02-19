@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/couchbase/cbauth/service_api"
+	"github.com/couchbase/cbauth/service"
 )
 
 type HTTPAPI struct {
@@ -101,7 +101,7 @@ func (h *HTTPAPI) TokenMap(rw http.ResponseWriter, req *http.Request) {
 	tokens := h.mgr.GetCurrentTokenMap().Tokens
 	resp := []ConcreteToken(nil)
 
-	hostnames := make(map[service_api.NodeID]string)
+	hostnames := make(map[service.NodeID]string)
 	for _, token := range tokens {
 		server := token.Server
 		host, ok := hostnames[server]

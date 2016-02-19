@@ -17,15 +17,15 @@ package main
 import (
 	"fmt"
 
-	"github.com/couchbase/cbauth/service_api"
+	"github.com/couchbase/cbauth/service"
 )
 
 var (
-	MyNode service_api.NodeID
+	MyNode service.NodeID
 	MyHost string
 )
 
-func InitNode(node service_api.NodeID, host string) {
+func InitNode(node service.NodeID, host string) {
 	MyNode = node
 	MyHost = host
 
@@ -33,20 +33,20 @@ func InitNode(node service_api.NodeID, host string) {
 	MaybeCreateInitialTokenMap()
 }
 
-func SetNodeHostName(node service_api.NodeID, host string) {
+func SetNodeHostName(node service.NodeID, host string) {
 	currentHost := GetNodeHostName(node)
 	if host != currentHost {
 		MetakvSet(hostPath(node), host)
 	}
 }
 
-func GetNodeHostName(node service_api.NodeID) string {
+func GetNodeHostName(node service.NodeID) string {
 	host := ""
 	MetakvGet(hostPath(node), &host)
 
 	return host
 }
 
-func hostPath(node service_api.NodeID) string {
+func hostPath(node service.NodeID) string {
 	return fmt.Sprintf("%snodes/%s/host", ServiceDir, node)
 }

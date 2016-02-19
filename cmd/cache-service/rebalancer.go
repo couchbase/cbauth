@@ -17,7 +17,7 @@ package main
 import (
 	"time"
 
-	"github.com/couchbase/cbauth/service_api"
+	"github.com/couchbase/cbauth/service"
 )
 
 type DoneCallback func(err error, cancel <-chan struct{})
@@ -30,7 +30,7 @@ type Callbacks struct {
 
 type Rebalancer struct {
 	tokens *TokenMap
-	change service_api.TopologyChange
+	change service.TopologyChange
 
 	cb Callbacks
 
@@ -38,7 +38,7 @@ type Rebalancer struct {
 	done   chan struct{}
 }
 
-func NewRebalancer(tokens *TokenMap, change service_api.TopologyChange,
+func NewRebalancer(tokens *TokenMap, change service.TopologyChange,
 	progress ProgressCallback, done DoneCallback) *Rebalancer {
 
 	r := &Rebalancer{
@@ -95,7 +95,7 @@ func (r *Rebalancer) updateHostNames() {
 }
 
 func (r *Rebalancer) updateTokenMap() {
-	nodes := []service_api.NodeID(nil)
+	nodes := []service.NodeID(nil)
 
 	for _, node := range r.change.KeepNodes {
 		nodes = append(nodes, node.NodeInfo.NodeID)

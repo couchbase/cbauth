@@ -17,16 +17,16 @@ package main
 import (
 	"encoding/binary"
 
-	"github.com/couchbase/cbauth/service_api"
+	"github.com/couchbase/cbauth/service"
 )
 
-func EncodeRev(rev uint64) service_api.Revision {
-	ext := make(service_api.Revision, 8)
+func EncodeRev(rev uint64) service.Revision {
+	ext := make(service.Revision, 8)
 	binary.BigEndian.PutUint64(ext, rev)
 
 	return ext
 }
 
-func DecodeRev(ext service_api.Revision) uint64 {
+func DecodeRev(ext service.Revision) uint64 {
 	return binary.BigEndian.Uint64(ext)
 }
