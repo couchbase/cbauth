@@ -21,7 +21,7 @@ import (
 	"os"
 	"sync"
 
-	. "github.com/couchbase/cbauth/service_api"
+	"github.com/couchbase/cbauth/service_api"
 )
 
 type Mgr struct {
@@ -38,7 +38,7 @@ type Mgr struct {
 }
 
 type rebalanceContext struct {
-	change TopologyChange
+	change service_api.TopologyChange
 	rev    uint64
 }
 
@@ -49,8 +49,8 @@ type state struct {
 	rev    uint64
 	tokens *TokenMap
 
-	rebalanceId   string
-	rebalanceTask *Task
+	rebalanceID   string
+	rebalanceTask *service_api.Task
 }
 
 func NewMgr() *Mgr {
@@ -68,22 +68,22 @@ func NewMgr() *Mgr {
 		state: state{
 			rev:           0,
 			tokens:        tokens,
-			rebalanceId:   "",
+			rebalanceID:   "",
 			rebalanceTask: nil,
 		},
 	}
 
 	go mgr.tokenMapStreamReader()
 
-	httpApi := HttpAPI{mgr, cache}
-	go httpApi.ListenAndServe()
+	httpAPI := HTTPAPI{mgr, cache}
+	go httpAPI.ListenAndServe()
 
 	return mgr
 }
 
 func RegisterManager() {
 	mgr := NewMgr()
-	err := RegisterServiceManager(mgr, nil)
+	err := service_api.RegisterServiceManager(mgr, nil)
 	if err != nil {
 		log.Fatalf("Couldn't register service manager: %s", err.Error())
 	}
@@ -100,15 +100,15 @@ func (m *Mgr) getCurrentTokenMapLOCKED() *TokenMap {
 	return m.copyStateLOCKED().tokens
 }
 
-func (m *Mgr) GetNodeInfo() (*NodeInfo, error) {
+func (m *Mgr) GetNodeInfo() (*service_api.NodeInfo, error) {
 	opaque := struct {
 		Host string `json:"host"`
 	}{
 		MyHost,
 	}
 
-	info := &NodeInfo{
-		NodeId:   MyNode,
+	info := &service_api.NodeInfo{
+		NodeID:   MyNode,
 		Priority: 0,
 		Opaque:   opaque,
 	}
@@ -122,7 +122,9 @@ func (m *Mgr) Shutdown() error {
 	return nil
 }
 
-func (m *Mgr) GetTaskList(rev Revision, cancel Cancel) (*TaskList, error) {
+func (m *Mgr) GetTaskList(rev service_api.Revision,
+	cancel service_api.Cancel) (*service_api.TaskList, error) {
+
 	state, err := m.wait(rev, cancel)
 	if err != nil {
 		return nil, err
@@ -131,38 +133,40 @@ func (m *Mgr) GetTaskList(rev Revision, cancel Cancel) (*TaskList, error) {
 	return stateToTaskList(state), nil
 }
 
-func (m *Mgr) CancelTask(id string, rev Revision) error {
+func (m *Mgr) CancelTask(id string, rev service_api.Revision) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	tasks := stateToTaskList(m.state).Tasks
-	task := (*Task)(nil)
+	task := (*service_api.Task)(nil)
 
 	for i := range tasks {
 		t := &tasks[i]
 
-		if t.Id == id {
+		if t.ID == id {
 			task = t
 			break
 		}
 	}
 
 	if task == nil {
-		return ErrNotFound
+		return service_api.ErrNotFound
 	}
 
 	if !task.IsCancelable {
-		return ErrNotSupported
+		return service_api.ErrNotSupported
 	}
 
 	if rev != nil && !bytes.Equal(rev, task.Rev) {
-		return ErrConflict
+		return service_api.ErrConflict
 	}
 
 	return m.cancelActualTaskLOCKED(task)
 }
 
-func (m *Mgr) GetCurrentTopology(rev Revision, cancel Cancel) (*Topology, error) {
+func (m *Mgr) GetCurrentTopology(rev service_api.Revision,
+	cancel service_api.Cancel) (*service_api.Topology, error) {
+
 	state, err := m.wait(rev, cancel)
 	if err != nil {
 		return nil, err
@@ -171,33 +175,33 @@ func (m *Mgr) GetCurrentTopology(rev Revision, cancel Cancel) (*Topology, error)
 	return stateToTopology(state), nil
 }
 
-func (m *Mgr) PrepareTopologyChange(change TopologyChange) error {
+func (m *Mgr) PrepareTopologyChange(change service_api.TopologyChange) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state.rebalanceId != "" {
-		return ErrConflict
+	if m.state.rebalanceID != "" {
+		return service_api.ErrConflict
 	}
 
 	m.updateStateLOCKED(func(s *state) {
-		s.rebalanceId = change.Id
+		s.rebalanceID = change.ID
 	})
 
 	return nil
 }
 
-func (m *Mgr) StartTopologyChange(change TopologyChange) error {
+func (m *Mgr) StartTopologyChange(change service_api.TopologyChange) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state.rebalanceId != change.Id || m.rebalancer != nil {
-		return ErrConflict
+	if m.state.rebalanceID != change.ID || m.rebalancer != nil {
+		return service_api.ErrConflict
 	}
 
 	if change.CurrentTopologyRev != nil {
 		haveRev := DecodeRev(change.CurrentTopologyRev)
 		if haveRev != m.state.rev {
-			return ErrConflict
+			return service_api.ErrConflict
 		}
 	}
 
@@ -243,17 +247,17 @@ func (m *Mgr) rebalanceProgressCallback(rev uint64, progress float64, cancel <-c
 	m.runRebalanceCallback(cancel, func() {
 		m.rebalanceCtx.rev = rev
 
-		changeId := m.rebalanceCtx.change.Id
-		task := &Task{
+		changeID := m.rebalanceCtx.change.ID
+		task := &service_api.Task{
 			Rev:          EncodeRev(rev),
-			Id:           fmt.Sprintf("rebalance/%s", changeId),
-			Type:         TaskTypeRebalance,
-			Status:       TaskStatusRunning,
+			ID:           fmt.Sprintf("rebalance/%s", changeID),
+			Type:         service_api.TaskTypeRebalance,
+			Status:       service_api.TaskStatusRunning,
 			IsCancelable: true,
 			Progress:     progress,
 
 			Extra: map[string]interface{}{
-				"rebalanceId": changeId,
+				"rebalanceId": changeID,
 			},
 		}
 
@@ -268,21 +272,21 @@ func (m *Mgr) rebalanceDoneCallback(err error, cancel <-chan struct{}) {
 }
 
 func (m *Mgr) onRebalanceDoneLOCKED(err error) {
-	newTask := (*Task)(nil)
+	newTask := (*service_api.Task)(nil)
 	if err != nil {
 		ctx := m.rebalanceCtx
 
-		newTask = &Task{
+		newTask = &service_api.Task{
 			Rev:          EncodeRev(ctx.rev),
-			Id:           fmt.Sprintf("rebalance/%s", ctx.change.Id),
-			Type:         TaskTypeRebalance,
-			Status:       TaskStatusFailed,
+			ID:           fmt.Sprintf("rebalance/%s", ctx.change.ID),
+			Type:         service_api.TaskTypeRebalance,
+			Status:       service_api.TaskStatusFailed,
 			IsCancelable: true,
 
 			ErrorMessage: err.Error(),
 
 			Extra: map[string]interface{}{
-				"rebalanceId": ctx.change.Id,
+				"rebalanceId": ctx.change.ID,
 			},
 		}
 	}
@@ -292,7 +296,7 @@ func (m *Mgr) onRebalanceDoneLOCKED(err error) {
 
 	m.updateStateLOCKED(func(s *state) {
 		s.rebalanceTask = newTask
-		s.rebalanceId = ""
+		s.rebalanceID = ""
 	})
 }
 
@@ -345,12 +349,14 @@ func (m *Mgr) updateState(body func(state *state)) {
 
 func (m *Mgr) updateStateLOCKED(body func(state *state)) {
 	body(&m.state)
-	m.state.rev += 1
+	m.state.rev++
 
 	m.notifyWaitersLOCKED()
 }
 
-func (m *Mgr) wait(rev Revision, cancel Cancel) (state, error) {
+func (m *Mgr) wait(rev service_api.Revision,
+	cancel service_api.Cancel) (state, error) {
+
 	m.mu.Lock()
 
 	unlock := NewCleanup(func() { m.mu.Unlock() })
@@ -373,7 +379,7 @@ func (m *Mgr) wait(rev Revision, cancel Cancel) (state, error) {
 	select {
 	case <-cancel:
 		m.removeWaiter(ch)
-		return state{}, ErrCanceled
+		return state{}, service_api.ErrCanceled
 	case newState := <-ch:
 		return newState, nil
 	}
@@ -386,11 +392,11 @@ func (m *Mgr) copyStateLOCKED() state {
 	return s
 }
 
-func (m *Mgr) cancelActualTaskLOCKED(task *Task) error {
+func (m *Mgr) cancelActualTaskLOCKED(task *service_api.Task) error {
 	switch task.Type {
-	case TaskTypePrepared:
+	case service_api.TaskTypePrepared:
 		return m.cancelPrepareTaskLOCKED()
-	case TaskTypeRebalance:
+	case service_api.TaskTypeRebalance:
 		return m.cancelRebalanceTaskLOCKED(task)
 	default:
 		panic("can't happen")
@@ -399,21 +405,21 @@ func (m *Mgr) cancelActualTaskLOCKED(task *Task) error {
 
 func (m *Mgr) cancelPrepareTaskLOCKED() error {
 	if m.rebalancer != nil {
-		return ErrConflict
+		return service_api.ErrConflict
 	}
 
 	m.updateStateLOCKED(func(s *state) {
-		s.rebalanceId = ""
+		s.rebalanceID = ""
 	})
 
 	return nil
 }
 
-func (m *Mgr) cancelRebalanceTaskLOCKED(task *Task) error {
+func (m *Mgr) cancelRebalanceTaskLOCKED(task *service_api.Task) error {
 	switch task.Status {
-	case TaskStatusRunning:
+	case service_api.TaskStatusRunning:
 		return m.cancelRunningRebalanceTaskLOCKED()
-	case TaskStatusFailed:
+	case service_api.TaskStatusFailed:
 		return m.cancelFailedRebalanceTaskLOCKED()
 	default:
 		panic("can't happen")
@@ -435,8 +441,8 @@ func (m *Mgr) cancelFailedRebalanceTaskLOCKED() error {
 	return nil
 }
 
-func stateToTopology(s state) *Topology {
-	topology := &Topology{}
+func stateToTopology(s state) *service_api.Topology {
+	topology := &service_api.Topology{}
 
 	topology.Rev = EncodeRev(s.rev)
 	topology.Nodes = s.tokens.Servers
@@ -446,20 +452,20 @@ func stateToTopology(s state) *Topology {
 	return topology
 }
 
-func stateToTaskList(s state) *TaskList {
-	tasks := &TaskList{}
+func stateToTaskList(s state) *service_api.TaskList {
+	tasks := &service_api.TaskList{}
 
 	tasks.Rev = EncodeRev(s.rev)
-	tasks.Tasks = make([]Task, 0)
+	tasks.Tasks = make([]service_api.Task, 0)
 
-	if s.rebalanceId != "" {
-		id := s.rebalanceId
+	if s.rebalanceID != "" {
+		id := s.rebalanceID
 
-		task := Task{
+		task := service_api.Task{
 			Rev:          EncodeRev(0),
-			Id:           fmt.Sprintf("prepare/%s", id),
-			Type:         TaskTypePrepared,
-			Status:       TaskStatusRunning,
+			ID:           fmt.Sprintf("prepare/%s", id),
+			Type:         service_api.TaskTypePrepared,
+			Status:       service_api.TaskStatusRunning,
 			IsCancelable: true,
 
 			Extra: map[string]interface{}{

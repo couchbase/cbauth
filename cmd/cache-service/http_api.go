@@ -21,15 +21,15 @@ import (
 	"net/http"
 	"strings"
 
-	. "github.com/couchbase/cbauth/service_api"
+	"github.com/couchbase/cbauth/service_api"
 )
 
-type HttpAPI struct {
+type HTTPAPI struct {
 	mgr   *Mgr
 	cache *Cache
 }
 
-func (h *HttpAPI) DispatchCache(rw http.ResponseWriter, req *http.Request) {
+func (h *HTTPAPI) DispatchCache(rw http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 	case "GET", "POST":
 		break
@@ -61,7 +61,7 @@ func (h *HttpAPI) DispatchCache(rw http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (h *HttpAPI) get(rw http.ResponseWriter, key string) {
+func (h *HTTPAPI) get(rw http.ResponseWriter, key string) {
 	v, err := h.cache.Get(key)
 	if err != nil {
 		if err == ErrKeyNotFound {
@@ -76,7 +76,7 @@ func (h *HttpAPI) get(rw http.ResponseWriter, key string) {
 	ok(rw).Body(v).Write()
 }
 
-func (h *HttpAPI) set(rw http.ResponseWriter, req *http.Request, key string) {
+func (h *HTTPAPI) set(rw http.ResponseWriter, req *http.Request, key string) {
 	value, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		internalError(rw).Body("Internal server error: " + err.Error()).Write()
@@ -92,7 +92,7 @@ type ConcreteToken struct {
 	Host  string `json:"host"`
 }
 
-func (h *HttpAPI) TokenMap(rw http.ResponseWriter, req *http.Request) {
+func (h *HTTPAPI) TokenMap(rw http.ResponseWriter, req *http.Request) {
 	if req.Method != "GET" {
 		methodNotAllowed(rw).Write()
 		return
@@ -101,7 +101,7 @@ func (h *HttpAPI) TokenMap(rw http.ResponseWriter, req *http.Request) {
 	tokens := h.mgr.GetCurrentTokenMap().Tokens
 	resp := []ConcreteToken(nil)
 
-	hostnames := make(map[NodeId]string)
+	hostnames := make(map[service_api.NodeID]string)
 	for _, token := range tokens {
 		server := token.Server
 		host, ok := hostnames[server]
@@ -120,7 +120,7 @@ func (h *HttpAPI) TokenMap(rw http.ResponseWriter, req *http.Request) {
 		resp = append(resp, ConcreteToken{token.Point, host})
 	}
 
-	ok(rw).Json(resp).Write()
+	ok(rw).JSON(resp).Write()
 }
 
 func ok(rw http.ResponseWriter) *Response {
@@ -155,9 +155,9 @@ func redirect(rw http.ResponseWriter, req *http.Request, host string) *Response 
 	return resp.Status(http.StatusFound)
 }
 
-func (api *HttpAPI) ListenAndServe() {
-	http.HandleFunc("/cache/", api.DispatchCache)
-	http.HandleFunc("/tokenMap", api.TokenMap)
+func (h *HTTPAPI) ListenAndServe() {
+	http.HandleFunc("/cache/", h.DispatchCache)
+	http.HandleFunc("/tokenMap", h.TokenMap)
 
 	err := http.ListenAndServe(MyHost, nil)
 	if err != nil {

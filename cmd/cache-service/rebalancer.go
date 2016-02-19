@@ -17,7 +17,7 @@ package main
 import (
 	"time"
 
-	. "github.com/couchbase/cbauth/service_api"
+	"github.com/couchbase/cbauth/service_api"
 )
 
 type DoneCallback func(err error, cancel <-chan struct{})
@@ -30,7 +30,7 @@ type Callbacks struct {
 
 type Rebalancer struct {
 	tokens *TokenMap
-	change TopologyChange
+	change service_api.TopologyChange
 
 	cb Callbacks
 
@@ -38,7 +38,7 @@ type Rebalancer struct {
 	done   chan struct{}
 }
 
-func NewRebalancer(tokens *TokenMap, change TopologyChange,
+func NewRebalancer(tokens *TokenMap, change service_api.TopologyChange,
 	progress ProgressCallback, done DoneCallback) *Rebalancer {
 
 	r := &Rebalancer{
@@ -86,7 +86,7 @@ func (r *Rebalancer) doRebalance() {
 
 func (r *Rebalancer) updateHostNames() {
 	for _, node := range r.change.KeepNodes {
-		id := node.NodeInfo.NodeId
+		id := node.NodeInfo.NodeID
 		opaque := node.NodeInfo.Opaque.(map[string]interface{})
 		host := opaque["host"].(string)
 
@@ -95,10 +95,10 @@ func (r *Rebalancer) updateHostNames() {
 }
 
 func (r *Rebalancer) updateTokenMap() {
-	nodes := []NodeId(nil)
+	nodes := []service_api.NodeID(nil)
 
 	for _, node := range r.change.KeepNodes {
-		nodes = append(nodes, node.NodeInfo.NodeId)
+		nodes = append(nodes, node.NodeInfo.NodeID)
 	}
 
 	r.tokens.UpdateServers(nodes)

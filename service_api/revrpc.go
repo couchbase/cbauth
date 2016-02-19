@@ -110,14 +110,14 @@ func (s ServiceAPI) GetTaskList(req GetTaskListReq, res *TaskList) error {
 }
 
 type CancelTaskReq struct {
-	Id  string   `json:"id"`
+	ID  string   `json:"id"`
 	Rev Revision `json:"rev,omitempty"`
 }
 
 func (s ServiceAPI) CancelTask(req CancelTaskReq, res *Void) error {
 	*res = nil
 
-	return s.mgr.CancelTask(req.Id, req.Rev)
+	return s.mgr.CancelTask(req.ID, req.Rev)
 }
 
 func (s ServiceAPI) PrepareTopologyChange(req TopologyChange, res *Void) error {

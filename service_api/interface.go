@@ -28,17 +28,17 @@ var (
 
 type Revision []byte
 type Priority int64
-type NodeId string
+type NodeID string
 
 type NodeInfo struct {
-	NodeId   NodeId      `json:"nodeId"`
+	NodeID   NodeID      `json:"nodeId"`
 	Priority Priority    `json:"priority"`
 	Opaque   interface{} `json:"opaque"`
 }
 
 type Topology struct {
 	Rev   Revision `json:"rev"`
-	Nodes []NodeId `json:"nodes"`
+	Nodes []NodeID `json:"nodes"`
 
 	IsBalanced bool     `json:"isBalanced"`
 	Messages   []string `json:"messages,omitempty"`
@@ -61,13 +61,13 @@ const (
 type Task struct {
 	Rev Revision `json:"rev"`
 
-	Id           string     `json:"id"`
+	ID           string     `json:"id"`
 	Type         TaskType   `json:"type"`
 	Status       TaskStatus `json:"status"`
 	IsCancelable bool       `json:"isCancelable"`
 
 	Progress         float64            `json:"progress"`
-	DetailedProgress map[NodeId]float64 `json:"detailedProgress,omitempty"`
+	DetailedProgress map[NodeID]float64 `json:"detailedProgress,omitempty"`
 
 	Description  string `json:"description,omitempty"`
 	ErrorMessage string `json:"errorMessage,omitempty"`
@@ -97,7 +97,7 @@ const (
 )
 
 type TopologyChange struct {
-	Id                 string   `json:"id"`
+	ID                 string   `json:"id"`
 	CurrentTopologyRev Revision `json:"currentTopologyRev"`
 
 	Type TopologyChangeType `json:"type"`
@@ -115,7 +115,7 @@ type ServiceManager interface {
 	Shutdown() error
 
 	GetTaskList(rev Revision, cancel Cancel) (*TaskList, error)
-	CancelTask(Id string, rev Revision) error
+	CancelTask(id string, rev Revision) error
 
 	GetCurrentTopology(rev Revision, cancel Cancel) (*Topology, error)
 

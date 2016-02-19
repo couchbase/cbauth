@@ -52,7 +52,7 @@ func (resp *Response) Body(value string) *Response {
 	return resp
 }
 
-func (resp *Response) Json(v interface{}) *Response {
+func (resp *Response) JSON(v interface{}) *Response {
 	resp.Header("Content-Type", "application/json")
 	json, err := json.Marshal(v)
 	if err != nil {
