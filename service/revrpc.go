@@ -22,8 +22,8 @@ import (
 	"github.com/couchbase/cbauth/revrpc"
 )
 
-type ServiceAPI struct {
-	mgr ServiceManager
+type serviceAPI struct {
+	mgr Manager
 }
 
 type Void *struct{}
@@ -47,7 +47,7 @@ func withTimeout(timeout int64, body func(Cancel)) {
 	once.Do(func() { close(cancel) })
 }
 
-func (s ServiceAPI) GetNodeInfo(Void, res *NodeInfo) error {
+func (s serviceAPI) GetNodeInfo(Void, res *NodeInfo) error {
 	info, err := s.mgr.GetNodeInfo()
 	if err != nil {
 		return err
@@ -62,13 +62,13 @@ type GetCurrentTopologyReq struct {
 	Timeout int64    `json:"timeout,omitempty"`
 }
 
-func (s ServiceAPI) Shutdown(Void, res *Void) error {
+func (s serviceAPI) Shutdown(Void, res *Void) error {
 	*res = nil
 
 	return s.mgr.Shutdown()
 }
 
-func (s ServiceAPI) GetCurrentTopology(req GetCurrentTopologyReq, res *Topology) error {
+func (s serviceAPI) GetCurrentTopology(req GetCurrentTopologyReq, res *Topology) error {
 	var topology *Topology
 	var err error
 
@@ -91,7 +91,7 @@ type GetTaskListReq struct {
 	Timeout int64    `json:"timeout,omitempty"`
 }
 
-func (s ServiceAPI) GetTaskList(req GetTaskListReq, res *TaskList) error {
+func (s serviceAPI) GetTaskList(req GetTaskListReq, res *TaskList) error {
 	var tasks *TaskList
 	var err error
 
@@ -114,26 +114,25 @@ type CancelTaskReq struct {
 	Rev Revision `json:"rev,omitempty"`
 }
 
-func (s ServiceAPI) CancelTask(req CancelTaskReq, res *Void) error {
+func (s serviceAPI) CancelTask(req CancelTaskReq, res *Void) error {
 	*res = nil
 
 	return s.mgr.CancelTask(req.ID, req.Rev)
 }
 
-func (s ServiceAPI) PrepareTopologyChange(req TopologyChange, res *Void) error {
+func (s serviceAPI) PrepareTopologyChange(req TopologyChange, res *Void) error {
 	*res = nil
 
 	return s.mgr.PrepareTopologyChange(req)
 }
 
-func (s ServiceAPI) StartTopologyChange(req TopologyChange, res *Void) error {
+func (s serviceAPI) StartTopologyChange(req TopologyChange, res *Void) error {
 	*res = nil
 
 	return s.mgr.StartTopologyChange(req)
 }
 
-func RegisterServiceManager(mgr ServiceManager,
-	errorPolicy revrpc.BabysitErrorPolicy) error {
+func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 
 	service, err := revrpc.GetDefaultServiceFromEnv("service_api")
 	if err != nil {
@@ -141,7 +140,7 @@ func RegisterServiceManager(mgr ServiceManager,
 	}
 
 	setup := func(rpc *rpc.Server) error {
-		return rpc.Register(&ServiceAPI{mgr})
+		return rpc.RegisterName("ServiceAPI", &serviceAPI{mgr})
 	}
 
 	return revrpc.BabysitService(setup, service, errorPolicy)

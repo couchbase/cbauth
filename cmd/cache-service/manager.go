@@ -83,7 +83,7 @@ func NewMgr() *Mgr {
 
 func RegisterManager() {
 	mgr := NewMgr()
-	err := service.RegisterServiceManager(mgr, nil)
+	err := service.RegisterManager(mgr, nil)
 	if err != nil {
 		log.Fatalf("Couldn't register service manager: %s", err.Error())
 	}

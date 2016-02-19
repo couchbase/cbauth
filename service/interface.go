@@ -110,7 +110,7 @@ type TopologyChange struct {
 	EjectNodes []NodeInfo `json:"ejectNodes"`
 }
 
-type ServiceManager interface {
+type Manager interface {
 	GetNodeInfo() (*NodeInfo, error)
 	Shutdown() error
 
