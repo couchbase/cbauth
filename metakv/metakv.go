@@ -92,26 +92,28 @@ func doCallInner(s *store, method, path string, values url.Values) (resp *http.R
 	}
 	r, err := s.client.Do(req)
 	if err != nil {
-		return nil, err
+		return r, err
 	}
 	if r.StatusCode == http.StatusConflict {
-		return nil, ErrRevMismatch
+		return r, ErrRevMismatch
 	}
 	if r.StatusCode == http.StatusNotFound {
-		return nil, errNotFound
+		return r, errNotFound
 	}
 	if r.StatusCode != 200 {
-		return nil, fmt.Errorf("ns_server _metakv returned: %s", r.Status)
+		return r, fmt.Errorf("ns_server _metakv returned: %s", r.Status)
 	}
 	return r, err
 }
 
 func doCall(s *store, method, path string, values url.Values) (body []byte, err error) {
 	r, err := doCallInner(s, method, path, values)
+	if r != nil {
+		defer r.Body.Close()
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer r.Body.Close()
 	return ioutil.ReadAll(r.Body)
 }
 
@@ -251,11 +253,12 @@ func doRunObserveChildren(s *store, dirpath string, callback Callback, cancel <-
 		values.Set("feed", "continuous")
 	}
 	r, err := doCallInner(s, "GET", dirpath, values)
+	if r != nil {
+		defer r.Body.Close()
+	}
 	if err != nil {
 		return err
 	}
-
-	defer r.Body.Close()
 
 	errChan := make(chan error, 1)
 	kveChan := make(chan kvEntry)
