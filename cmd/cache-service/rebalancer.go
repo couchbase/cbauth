@@ -62,7 +62,20 @@ func (r *Rebalancer) Cancel() {
 func (r *Rebalancer) doRebalance() {
 	defer close(r.done)
 
-	// fake progress
+	isInitial := (len(r.tokens.Servers) == 0)
+	isFailover := (r.change.Type == service.TopologyChangeTypeFailover)
+
+	if !(isFailover || isInitial) {
+		// make failover and initial rebalance fast
+		r.fakeProgress()
+	}
+
+	r.updateHostNames()
+	r.updateTokenMap()
+	r.cb.done(nil, r.cancel)
+}
+
+func (r *Rebalancer) fakeProgress() {
 	seconds := 20
 	progress := float64(0)
 	increment := 1.0 / float64(seconds)
@@ -78,10 +91,6 @@ func (r *Rebalancer) doRebalance() {
 			return
 		}
 	}
-
-	r.updateHostNames()
-	r.updateTokenMap()
-	r.cb.done(nil, r.cancel)
 }
 
 func (r *Rebalancer) updateHostNames() {
