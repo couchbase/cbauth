@@ -217,12 +217,14 @@ func (m *Mgr) StartTopologyChange(change service.TopologyChange) error {
 		change: change,
 	}
 
+	m.rebalanceCtx = ctx
+	m.updateRebalanceProgressLOCKED(0)
+
 	tokens := m.getCurrentTokenMapLOCKED()
 	rebalancer := NewRebalancer(tokens, change,
 		m.rebalanceProgressCallback, m.rebalanceDoneCallback)
 
 	m.rebalancer = rebalancer
-	m.rebalanceCtx = ctx
 
 	return nil
 }
@@ -252,24 +254,28 @@ func (m *Mgr) runRebalanceCallback(cancel <-chan struct{}, body func()) {
 
 func (m *Mgr) rebalanceProgressCallback(progress float64, cancel <-chan struct{}) {
 	m.runRebalanceCallback(cancel, func() {
-		rev := m.rebalanceCtx.incRev()
-		changeID := m.rebalanceCtx.change.ID
-		task := &service.Task{
-			Rev:          EncodeRev(rev),
-			ID:           fmt.Sprintf("rebalance/%s", changeID),
-			Type:         service.TaskTypeRebalance,
-			Status:       service.TaskStatusRunning,
-			IsCancelable: true,
-			Progress:     progress,
+		m.updateRebalanceProgressLOCKED(progress)
+	})
+}
 
-			Extra: map[string]interface{}{
-				"rebalanceId": changeID,
-			},
-		}
+func (m *Mgr) updateRebalanceProgressLOCKED(progress float64) {
+	rev := m.rebalanceCtx.incRev()
+	changeID := m.rebalanceCtx.change.ID
+	task := &service.Task{
+		Rev:          EncodeRev(rev),
+		ID:           fmt.Sprintf("rebalance/%s", changeID),
+		Type:         service.TaskTypeRebalance,
+		Status:       service.TaskStatusRunning,
+		IsCancelable: true,
+		Progress:     progress,
 
-		m.updateStateLOCKED(func(s *state) {
-			s.rebalanceTask = task
-		})
+		Extra: map[string]interface{}{
+			"rebalanceId": changeID,
+		},
+	}
+
+	m.updateStateLOCKED(func(s *state) {
+		s.rebalanceTask = task
 	})
 }
 
