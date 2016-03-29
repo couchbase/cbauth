@@ -457,10 +457,19 @@ func (m *Mgr) cancelFailedRebalanceTaskLOCKED() error {
 func stateToTopology(s state) *service.Topology {
 	topology := &service.Topology{}
 
+	servers := s.tokens.Servers
+
 	topology.Rev = EncodeRev(s.rev)
-	topology.Nodes = s.tokens.Servers
+	topology.Nodes = servers
 	topology.IsBalanced = true
-	topology.Messages = nil
+
+	if len(servers) <= 1 {
+		topology.Messages = []string{
+			"Not enough nodes to achieve awesomeness",
+		}
+	} else {
+		topology.Messages = nil
+	}
 
 	return topology
 }
