@@ -42,6 +42,13 @@ type rebalanceContext struct {
 	rev    uint64
 }
 
+func (ctx *rebalanceContext) incRev() uint64 {
+	curr := ctx.rev
+	ctx.rev++
+
+	return curr
+}
+
 type waiter chan state
 type waiters map[waiter]struct{}
 
@@ -243,10 +250,9 @@ func (m *Mgr) runRebalanceCallback(cancel <-chan struct{}, body func()) {
 	}
 }
 
-func (m *Mgr) rebalanceProgressCallback(rev uint64, progress float64, cancel <-chan struct{}) {
+func (m *Mgr) rebalanceProgressCallback(progress float64, cancel <-chan struct{}) {
 	m.runRebalanceCallback(cancel, func() {
-		m.rebalanceCtx.rev = rev
-
+		rev := m.rebalanceCtx.incRev()
 		changeID := m.rebalanceCtx.change.ID
 		task := &service.Task{
 			Rev:          EncodeRev(rev),
@@ -275,9 +281,10 @@ func (m *Mgr) onRebalanceDoneLOCKED(err error) {
 	newTask := (*service.Task)(nil)
 	if err != nil {
 		ctx := m.rebalanceCtx
+		rev := ctx.incRev()
 
 		newTask = &service.Task{
-			Rev:          EncodeRev(ctx.rev),
+			Rev:          EncodeRev(rev),
 			ID:           fmt.Sprintf("rebalance/%s", ctx.change.ID),
 			Type:         service.TaskTypeRebalance,
 			Status:       service.TaskStatusFailed,

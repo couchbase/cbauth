@@ -21,7 +21,7 @@ import (
 )
 
 type DoneCallback func(err error, cancel <-chan struct{})
-type ProgressCallback func(rev uint64, progress float64, cancel <-chan struct{})
+type ProgressCallback func(progress float64, cancel <-chan struct{})
 
 type Callbacks struct {
 	progress ProgressCallback
@@ -80,13 +80,13 @@ func (r *Rebalancer) fakeProgress() {
 	progress := float64(0)
 	increment := 1.0 / float64(seconds)
 
-	r.cb.progress(0, progress, r.cancel)
+	r.cb.progress(progress, r.cancel)
 
 	for i := 0; i < seconds; i++ {
 		select {
 		case <-time.After(1 * time.Second):
 			progress += increment
-			r.cb.progress(uint64(i)+1, progress, r.cancel)
+			r.cb.progress(progress, r.cancel)
 		case <-r.cancel:
 			return
 		}
