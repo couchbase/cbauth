@@ -134,10 +134,6 @@ func (rt *testingRoundTripper) RoundTrip(req *http.Request) (res *http.Response,
 	}, nil
 }
 
-func (rt *testingRoundTripper) resetTripped() {
-	rt.tripped = false
-}
-
 func (rt *testingRoundTripper) assertTripped(t *testing.T, expected bool) {
 	if rt.tripped != expected {
 		t.Fatalf("Tripped is not expected. Have: %v, need: %v", rt.tripped, expected)
