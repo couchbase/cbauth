@@ -70,35 +70,42 @@ func assertAdmins(t *testing.T, c Creds, needAdmin, needROAdmin bool) {
 
 type testingRoundTripper struct {
 	t       *testing.T
-	method  string
-	url     string
+	baseURL string
 	user    string
 	source  string
 	token   string
 	tripped bool
 }
 
-func newTestingRT(t *testing.T, method, uri string) *testingRoundTripper {
+func newTestingRT(t *testing.T, baseURL string) *testingRoundTripper {
 	return &testingRoundTripper{
-		t:      t,
-		method: method,
-		url:    uri,
+		t:       t,
+		baseURL: baseURL,
 	}
 }
 
 func (rt *testingRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
+	path := strings.TrimPrefix(req.URL.String(), rt.baseURL)
+
+	if req.URL.String() == path {
+		log.Fatalf("Bad url: %v", req.URL)
+	}
+
+	switch {
+	case req.Method == "POST" && path == "/_auth":
+		return rt.authRoundTrip(req)
+	}
+
+	log.Fatalf("Unrecognized call, method: %s, path: %s", req.Method, path)
+	return
+}
+
+func (rt *testingRoundTripper) authRoundTrip(req *http.Request) (res *http.Response, err error) {
 	if rt.tripped {
 		log.Fatalf("Already tripped")
 	}
 
 	rt.tripped = true
-
-	if req.URL.String() != rt.url {
-		log.Fatalf("Bad url: %v != %v", rt.url, req.URL)
-	}
-	if req.Method != rt.method {
-		log.Fatalf("Bad method: %s != %s", rt.method, req.Method)
-	}
 
 	statusCode := 200
 
@@ -358,15 +365,15 @@ func overrideDefClient(c *http.Client) func() {
 }
 
 func TestTokenAdmin(t *testing.T) {
-	url := "http://127.0.0.1:9000/_auth"
+	url := "http://127.0.0.1:9000"
 
-	tr := newTestingRT(t, "POST", url)
+	tr := newTestingRT(t, url)
 	tr.setTokenAuth("Administrator", "admin", "1234567890")
 
 	defer overrideDefClient(&http.Client{Transport: tr})()
 
 	a := newAuth(0)
-	must(a.svc.UpdateDB(&cbauthimpl.Cache{AuthCheckURL: url}, nil))
+	must(a.svc.UpdateDB(&cbauthimpl.Cache{AuthCheckURL: url + "/_auth"}, nil))
 
 	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
 	must(err)
