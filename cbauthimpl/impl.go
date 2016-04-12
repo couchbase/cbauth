@@ -141,24 +141,6 @@ func (c *CredsImpl) IsAllowed(permission string) (bool, error) {
 	return checkPermission(c.s, c.name, c.source, permission)
 }
 
-// IsAdmin method returns true iff this creds represent valid
-// admin account.
-func (c *CredsImpl) IsAdmin() (bool, error) {
-	return c.source == "admin", nil
-}
-
-// IsROAdmin method returns true iff this creds represent valid
-// read only admin account.
-func (c *CredsImpl) IsROAdmin() (bool, error) {
-	return c.CanReadAnyMetadata(), nil
-}
-
-// CanReadAnyMetadata method returns true iff this creds represents
-// admin or ro-admin account.
-func (c *CredsImpl) CanReadAnyMetadata() bool {
-	return c.source == "admin" || c.source == "ro_admin"
-}
-
 func verifySpecialCreds(db *credsDB, user, password string) bool {
 	return len(user) > 0 && user[0] == '@' && password == db.specialPassword
 }
@@ -170,34 +152,6 @@ func checkBucketPassword(db *credsDB, bucket, givenPassword string) bool {
 	// reason, I'm keeping away from trouble for now.
 	pwd, exists := db.buckets[bucket]
 	return exists && pwd == givenPassword
-}
-
-// CanAccessBucket method returns true iff this creds
-// represent valid account that can read/write/query docs in given
-// bucket.
-func (c *CredsImpl) CanAccessBucket(bucket string) (bool, error) {
-	if c.source == "admin" {
-		return true, nil
-	}
-	if c.name != "" && c.name != bucket {
-		return false, nil
-	}
-	return checkBucketPassword(c.db, bucket, c.password), nil
-}
-
-// CanReadBucket method returns true iff this creds represent
-// valid account that can read (but not necessarily write)
-// docs in given bucket.
-func (c *CredsImpl) CanReadBucket(bucket string) (bool, error) {
-	return c.CanAccessBucket(bucket)
-}
-
-// CanDDLBucket method returns true iff this creds represent
-// valid account that can DDL in given bucket. Note that at
-// this time it delegates to CanAccessBucket in only
-// implementation.
-func (c *CredsImpl) CanDDLBucket(bucket string) (bool, error) {
-	return c.CanAccessBucket(bucket)
 }
 
 // Svc is a struct that holds state of cbauth service.

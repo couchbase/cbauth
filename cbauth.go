@@ -46,8 +46,6 @@ type Authenticator interface {
 	GetMemcachedServiceAuth(hostport string) (user, pwd string, err error)
 }
 
-// TODO: get rid of unnecessary error returns
-
 // Creds type represents credentials and answers queries on this creds
 // authorized actions. Note: it'll become (possibly much) wider API in
 // future, but it's main purpose right now is to get us started.
@@ -59,28 +57,6 @@ type Creds interface {
 	// IsAllowed method returns true if the permission is granted
 	// for these credentials
 	IsAllowed(permission string) (bool, error)
-	// IsAdmin method returns true iff this creds represent valid
-	// admin account.
-	IsAdmin() (bool, error)
-	// CanReadAnyMetadata method returns true iff this creds has
-	// permission to read any metadata (i.e. admin or ro-admin).
-	CanReadAnyMetadata() bool
-	// IsROAdmin is confusing alias for CanReadAnyMetadata. Don't
-	// use!
-	IsROAdmin() (bool, error)
-	// CanAccessBucket method returns true iff this creds
-	// represent valid account that can read/write/query docs in given
-	// bucket.
-	CanAccessBucket(bucket string) (bool, error)
-	// CanReadBucket method returns true iff this creds represent
-	// valid account that can read (but not necessarily write)
-	// docs in given bucket.
-	CanReadBucket(bucket string) (bool, error)
-	// CanDDLBucket method returns true iff this creds represent
-	// valid account that can DDL in given bucket. Note that at
-	// this time it delegates to CanAccessBucket in only
-	// implementation.
-	CanDDLBucket(bucket string) (bool, error)
 }
 
 var _ Creds = (*cbauthimpl.CredsImpl)(nil)
