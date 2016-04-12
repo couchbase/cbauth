@@ -115,6 +115,30 @@ func (rt *testingRoundTripper) RoundTrip(req *http.Request) (res *http.Response,
 	return
 }
 
+func respond(req *http.Request, statusCode int, response string) *http.Response {
+	respBody := ioutil.NopCloser(strings.NewReader(response))
+
+	status := "None"
+	switch statusCode {
+	case 401:
+		status = "401 Unauthorized"
+	case 200:
+		status = "200 OK"
+	}
+
+	return &http.Response{
+		Status:        status,
+		StatusCode:    statusCode,
+		Proto:         "HTTP/1.0",
+		ProtoMajor:    1,
+		ProtoMinor:    0,
+		Header:        http.Header{},
+		Body:          respBody,
+		ContentLength: -1,
+		Trailer:       http.Header{},
+		Request:       req,
+	}
+}
 func (rt *testingRoundTripper) authRoundTrip(req *http.Request) (res *http.Response, err error) {
 	if rt.tripped {
 		log.Fatalf("Already tripped")
@@ -134,26 +158,11 @@ func (rt *testingRoundTripper) authRoundTrip(req *http.Request) (res *http.Respo
 	}
 
 	response := ""
-	status := "401 Unauthorized"
 	if statusCode == 200 {
 		response = fmt.Sprintf(`{"user": "%s", "source": "%s"}`, rt.user, rt.source)
-		status = "200 OK"
 	}
 
-	respBody := ioutil.NopCloser(strings.NewReader(response))
-
-	return &http.Response{
-		Status:        status,
-		StatusCode:    statusCode,
-		Proto:         "HTTP/1.0",
-		ProtoMajor:    1,
-		ProtoMinor:    0,
-		Header:        http.Header{},
-		Body:          respBody,
-		ContentLength: -1,
-		Trailer:       http.Header{},
-		Request:       req,
-	}, nil
+	return respond(req, statusCode, response), nil
 }
 
 func (rt *testingRoundTripper) assertTripped(t *testing.T, expected bool) {
