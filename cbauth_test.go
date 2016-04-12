@@ -68,6 +68,21 @@ func assertAdmins(t *testing.T, c Creds, needAdmin, needROAdmin bool) {
 	}
 }
 
+func applyRT(rt *testingRoundTripper) func() {
+	var old *http.Client
+	old, http.DefaultClient = http.DefaultClient, &http.Client{Transport: rt}
+	return func() {
+		http.DefaultClient = old
+	}
+}
+
+func newCache(a *authImpl) *cbauthimpl.Cache {
+	url := "http://127.0.0.1:9000"
+	return &cbauthimpl.Cache{
+		AuthCheckURL: url + "/_auth",
+	}
+}
+
 type testingRoundTripper struct {
 	t       *testing.T
 	baseURL string
@@ -77,10 +92,10 @@ type testingRoundTripper struct {
 	tripped bool
 }
 
-func newTestingRT(t *testing.T, baseURL string) *testingRoundTripper {
+func newTestingRT(t *testing.T) *testingRoundTripper {
 	return &testingRoundTripper{
 		t:       t,
-		baseURL: baseURL,
+		baseURL: "http://127.0.0.1:9000",
 	}
 }
 
@@ -356,24 +371,13 @@ func TestServicePwd(t *testing.T) {
 	}
 }
 
-func overrideDefClient(c *http.Client) func() {
-	var old *http.Client
-	old, http.DefaultClient = http.DefaultClient, c
-	return func() {
-		http.DefaultClient = old
-	}
-}
-
 func TestTokenAdmin(t *testing.T) {
-	url := "http://127.0.0.1:9000"
-
-	tr := newTestingRT(t, url)
-	tr.setTokenAuth("Administrator", "admin", "1234567890")
-
-	defer overrideDefClient(&http.Client{Transport: tr})()
+	rt := newTestingRT(t)
+	rt.setTokenAuth("Administrator", "admin", "1234567890")
+	defer applyRT(rt)()
 
 	a := newAuth(0)
-	must(a.svc.UpdateDB(&cbauthimpl.Cache{AuthCheckURL: url + "/_auth"}, nil))
+	must(a.svc.UpdateDB(newCache(a), nil))
 
 	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
 	must(err)
@@ -382,7 +386,7 @@ func TestTokenAdmin(t *testing.T) {
 
 	c, err := a.AuthWebCreds(req)
 	must(err)
-	tr.assertTripped(t, true)
+	rt.assertTripped(t, true)
 
 	assertAdmins(t, c, true, false)
 
