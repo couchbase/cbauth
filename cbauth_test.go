@@ -59,10 +59,11 @@ func acc(ok bool, err error) bool {
 }
 
 func assertAdmins(t *testing.T, c Creds, needAdmin, needROAdmin bool) {
-	if acc(c.IsAdmin()) != needAdmin {
+	if acc(c.IsAllowed("cluster.admin.settings!write")) != needAdmin {
 		t.Fatalf("admin access must be: %v", needAdmin)
 	}
-	roadmin := !acc(c.IsAdmin()) && c.CanReadAnyMetadata()
+	roadmin := !acc(c.IsAllowed("cluster.admin.settings!write")) &&
+		acc(c.IsAllowed("cluster.admin.security!read"))
 	if roadmin != needROAdmin {
 		t.Fatalf("ro-admin access must be: %v", needROAdmin)
 	}
@@ -79,7 +80,8 @@ func applyRT(rt *testingRoundTripper) func() {
 func newCache(a *authImpl) *cbauthimpl.Cache {
 	url := "http://127.0.0.1:9000"
 	return &cbauthimpl.Cache{
-		AuthCheckURL: url + "/_auth",
+		AuthCheckURL:       url + "/_auth",
+		PermissionCheckURL: url + "/_permissions",
 	}
 }
 
@@ -109,6 +111,8 @@ func (rt *testingRoundTripper) RoundTrip(req *http.Request) (res *http.Response,
 	switch {
 	case req.Method == "POST" && path == "/_auth":
 		return rt.authRoundTrip(req)
+	case req.Method == "GET" && strings.HasPrefix(path, "/_permissions"):
+		return rt.permissionsRoundTrip(req)
 	}
 
 	log.Fatalf("Unrecognized call, method: %s, path: %s", req.Method, path)
@@ -139,6 +143,34 @@ func respond(req *http.Request, statusCode int, response string) *http.Response 
 		Request:       req,
 	}
 }
+
+func (rt *testingRoundTripper) permissionsRoundTrip(req *http.Request) (res *http.Response, err error) {
+	params := req.URL.Query()
+	permission := params["permission"]
+	user := params["user"]
+	src := params["src"]
+
+	if permission == nil || user == nil || src == nil {
+		log.Fatalf("Missing parameters in request: %s", req.URL.String())
+	}
+
+	statusCode := 401
+
+	switch src[0] {
+	case "admin":
+		statusCode = 200
+	case "bucket":
+		if permission[0] == "cluster.bucket["+user[0]+"].data!write" {
+			statusCode = 200
+		}
+	case "anonymous":
+		if permission[0] == "cluster.bucket[default].data!write" {
+			statusCode = 200
+		}
+	}
+	return respond(req, statusCode, ""), nil
+}
+
 func (rt *testingRoundTripper) authRoundTrip(req *http.Request) (res *http.Response, err error) {
 	if rt.tripped {
 		log.Fatalf("Already tripped")
@@ -217,6 +249,8 @@ func TestStale(t *testing.T) {
 }
 
 func doTestStaleThenAdmin(t *testing.T, updateBeforeTimer bool) {
+	defer applyRT(newTestingRT(t))()
+
 	timerchan := make(chan bool)
 	var freshChan chan struct{}
 	a := newAuthForTest(func(ch chan struct{}, timeoutBody func()) {
@@ -229,9 +263,10 @@ func doTestStaleThenAdmin(t *testing.T, updateBeforeTimer bool) {
 
 	updatechan := make(chan bool)
 	go func() {
-		c := cbauthimpl.Cache{Admin: mkUser("admin", "asdasd", "nacl")}
+		c := newCache(a)
+		c.Admin = mkUser("admin", "asdasd", "nacl")
 		<-updatechan
-		must(a.svc.UpdateDB(&c, nil))
+		must(a.svc.UpdateDB(c, nil))
 		<-updatechan
 	}()
 
@@ -250,7 +285,7 @@ func doTestStaleThenAdmin(t *testing.T, updateBeforeTimer bool) {
 	cred, err := a.Auth("admin", "asdasd")
 	if updateBeforeTimer {
 		must(err)
-		if ok, _ := cred.IsAdmin(); !ok {
+		if ok, _ := cred.IsAllowed("cluster.admin.settings!write"); !ok {
 			t.Fatal("user admin must be recognised as admin")
 		}
 	} else {
@@ -272,7 +307,7 @@ func doTestStaleThenAdmin(t *testing.T, updateBeforeTimer bool) {
 
 	cred, err = a.Auth("admin", "asdasd")
 	must(err)
-	if ok, _ := cred.IsAdmin(); !ok {
+	if ok, _ := cred.IsAllowed("cluster.admin.settings!write"); !ok {
 		t.Fatal("user admin must be recognised as admin")
 	}
 }
@@ -291,21 +326,27 @@ func mkBucket(name, pwd string) (rv cbauthimpl.Bucket) {
 	return
 }
 
+func canAccessBucket(c Creds, bucket string) bool {
+	return acc(c.IsAllowed("cluster.bucket[" + bucket + "].data!write"))
+}
+
 func TestBucketsAuth(t *testing.T) {
+	defer applyRT(newTestingRT(t))()
+
 	a := newAuth(0)
-	must(a.svc.UpdateDB(&cbauthimpl.Cache{
-		Buckets: append(cbauthimpl.Cache{}.Buckets,
-			mkBucket("default", ""),
-			mkBucket("foo", "bar"))}, nil))
+	cache := newCache(a)
+	cache.Buckets = append(cbauthimpl.Cache{}.Buckets, mkBucket("default", ""), mkBucket("foo", "bar"))
+	must(a.svc.UpdateDB(cache, nil))
+
 	c, err := a.Auth("foo", "bar")
 	must(err)
-	if !acc(c.CanAccessBucket("foo")) {
+	if !canAccessBucket(c, "foo") {
 		t.Fatal("Expect foo access with right pw to work")
 	}
-	if acc(c.CanAccessBucket("default")) {
+	if canAccessBucket(c, "default") {
 		t.Fatal("Expect default access to not work when authed towards foo")
 	}
-	if acc(c.CanAccessBucket("unknown")) {
+	if canAccessBucket(c, "unknown") {
 		t.Fatal("Expect unknown bucket access to not work")
 	}
 	assertAdmins(t, c, false, false)
@@ -318,10 +359,10 @@ func TestBucketsAuth(t *testing.T) {
 	c, err = a.Auth("", "")
 	must(err)
 	assertAdmins(t, c, false, false)
-	if acc(c.CanAccessBucket("foo")) {
+	if canAccessBucket(c, "foo") {
 		t.Fatal("Expect foo access to not work under anon auth")
 	}
-	if !acc(c.CanAccessBucket("default")) {
+	if !canAccessBucket(c, "default") {
 		t.Fatal("Expect default access to work under anon auth")
 	}
 
@@ -332,7 +373,7 @@ func TestBucketsAuth(t *testing.T) {
 	c, err = a.Auth("foo", "bar")
 	must(err)
 	assertAdmins(t, c, false, false)
-	if !acc(c.CanAccessBucket("foo")) {
+	if !canAccessBucket(c, "foo") {
 		t.Fatal("Expect foo access to work under right pw")
 	}
 	// and no password access should not work
@@ -407,10 +448,10 @@ func TestTokenAdmin(t *testing.T) {
 		t.Errorf("Expect source to be ns_server. Got %s", c.Source())
 	}
 
-	if !acc(c.CanAccessBucket("asdasdasdasd")) {
+	if !canAccessBucket(c, "asdasdasdasd") {
 		t.Errorf("Expected to be able to access all buckets. Failed at asdasdasdasd")
 	}
-	if !acc(c.CanAccessBucket("ffee")) {
+	if !canAccessBucket(c, "ffee") {
 		t.Errorf("Expected to be able to access all buckets. Failed at ffee")
 	}
 }
