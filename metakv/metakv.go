@@ -267,7 +267,7 @@ func doRunObserveChildren(s *store, dirpath string, callback Callback, cancel <-
 		dec := json.NewDecoder(r.Body)
 		var kve kvEntry
 		for {
-			err = dec.Decode(&kve)
+			err := dec.Decode(&kve)
 			if err != nil {
 				errChan <- err
 				close(kveChan)
