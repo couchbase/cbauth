@@ -37,6 +37,8 @@ var Default Authenticator
 
 var errDisconnected = errors.New("revrpc connection to ns_server was closed")
 
+const waitBeforeStale = time.Minute
+
 func runRPCForSvc(rpcsvc *revrpc.Service, svc *cbauthimpl.Svc) error {
 	defPolicy := revrpc.DefaultBabysitErrorPolicy.New()
 	// error restart policy that we're going to use simply
@@ -57,7 +59,7 @@ func runRPCForSvc(rpcsvc *revrpc.Service, svc *cbauthimpl.Svc) error {
 }
 
 func startDefault(rpcsvc *revrpc.Service) {
-	svc := cbauthimpl.NewSVC(5*time.Second, &DBStaleError{})
+	svc := cbauthimpl.NewSVC(waitBeforeStale, &DBStaleError{})
 	Default = &authImpl{svc}
 	go func() {
 		panic(runRPCForSvc(rpcsvc, svc))
