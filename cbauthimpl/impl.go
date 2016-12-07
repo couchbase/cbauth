@@ -65,6 +65,7 @@ func getMemcachedCreds(n Node, host string, port int) (user, password string) {
 // some user (admin or ro-admin).
 type User struct {
 	User string
+	Type string
 	Salt []byte
 	Mac  []byte
 }
@@ -75,21 +76,10 @@ type Bucket struct {
 	Password string
 }
 
-func verifyCreds(u User, user, password string) bool {
-	if u.User == "" || u.User != user {
-		return false
-	}
-
-	mac := hmac.New(sha1.New, u.Salt)
-	mac.Write([]byte(password))
-	return hmac.Equal(u.Mac, mac.Sum(nil))
-}
-
 type credsDB struct {
 	nodes              []Node
 	buckets            map[string]string
-	admin              User
-	roadmin            User
+	users              []User
 	hasNoPwdBucket     bool
 	authCheckURL       string
 	permissionCheckURL string
@@ -103,8 +93,7 @@ type credsDB struct {
 type Cache struct {
 	Nodes              []Node
 	Buckets            []Bucket
-	Admin              User
-	ROAdmin            User   `json:"roAdmin"`
+	Users              []User
 	AuthCheckURL       string `json:"authCheckUrl"`
 	PermissionCheckURL string `json:"permissionCheckUrl"`
 	SpecialUser        string `json:"specialUser"`
@@ -154,6 +143,21 @@ func checkBucketPassword(db *credsDB, bucket, givenPassword string) bool {
 	return exists && pwd == givenPassword
 }
 
+func verifyPassword(u *User, password string) bool {
+	mac := hmac.New(sha1.New, u.Salt)
+	mac.Write([]byte(password))
+	return hmac.Equal(u.Mac, mac.Sum(nil))
+}
+
+func authBuiltinUsers(db *credsDB, user, password string) (bool, string) {
+	for _, u := range db.users {
+		if u.User == user {
+			return verifyPassword(&u, password), u.Type
+		}
+	}
+	return false, ""
+}
+
 // Svc is a struct that holds state of cbauth service.
 type Svc struct {
 	l         sync.Mutex
@@ -168,8 +172,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 	db = &credsDB{
 		nodes:              c.Nodes,
 		buckets:            make(map[string]string),
-		admin:              c.Admin,
-		roadmin:            c.ROAdmin,
+		users:              c.Users,
 		hasNoPwdBucket:     false,
 		authCheckURL:       c.AuthCheckURL,
 		permissionCheckURL: c.PermissionCheckURL,
@@ -422,14 +425,18 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	}
 	rv := &CredsImpl{name: user, password: password, db: db, s: s}
 
-	switch {
-	case verifySpecialCreds(db, user, password):
+	if verifySpecialCreds(db, user, password) {
 		rv.source = "admin"
-	case verifyCreds(db.admin, user, password):
-		rv.source = "admin"
-	case verifyCreds(db.roadmin, user, password):
-		rv.source = "ro_admin"
-	case user == "":
+		return rv, nil
+	}
+
+	found, source := authBuiltinUsers(db, user, password)
+	if found {
+		rv.source = source
+		return rv, nil
+	}
+
+	if user == "" {
 		if !(password == "" && db.hasNoPwdBucket) {
 			// we only allow anonymous access if password
 			// is also empty and there is at least one
@@ -437,17 +444,17 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 			return nil, nil
 		}
 		rv.source = "anonymous"
-	default:
-		if !checkBucketPassword(db, user, password) {
-			// right now we only grant access if username
-			// matches specific bucket and bucket password
-			// is given
-			return nil, nil
-		}
-		rv.source = "bucket"
+		return rv, nil
 	}
 
-	return rv, nil
+	if checkBucketPassword(db, user, password) {
+		// right now we only grant access if username
+		// matches specific bucket and bucket password
+		// is given
+		rv.source = "bucket"
+		return rv, nil
+	}
+	return nil, nil
 }
 
 // GetCreds returns service password for given host and port

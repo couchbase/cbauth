@@ -33,8 +33,9 @@ func hashPassword(password string, salt []byte) []byte {
 	return h.Sum(nil)
 }
 
-func mkUser(user, password, salt string) (u cbauthimpl.User) {
+func mkUser(user, uType, password, salt string) (u cbauthimpl.User) {
 	u.User = user
+	u.Type = uType
 	u.Salt = []byte(salt)
 	u.Mac = hashPassword(password, u.Salt)
 	return
@@ -264,7 +265,9 @@ func doTestStaleThenAdmin(t *testing.T, updateBeforeTimer bool) {
 	updatechan := make(chan bool)
 	go func() {
 		c := newCache(a)
-		c.Admin = mkUser("admin", "asdasd", "nacl")
+		var users []cbauthimpl.User
+		users = append(users, mkUser("admin", "admin", "asdasd", "nacl"))
+		c.Users = users
 		<-updatechan
 		must(a.svc.UpdateDB(c, nil))
 		<-updatechan
