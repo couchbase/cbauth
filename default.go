@@ -81,7 +81,7 @@ func init() {
 // really needed. Returns false if Default Authenticator was already
 // initialized.
 func InternalRetryDefaultInit(mgmtHostPort, user, password string) (bool, error) {
-	service:= filepath.Base(os.Args[0])
+	service := filepath.Base(os.Args[0])
 	return InternalRetryDefaultInitWithService(service, mgmtHostPort, user, password)
 }
 
