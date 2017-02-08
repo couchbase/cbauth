@@ -80,7 +80,7 @@ func (e *DBStaleError) Error() string {
 
 // ErrNoAuth is an error that is returned when the user credentials
 // are not recognized
-var ErrNoAuth = errors.New("Authentication failure.")
+var ErrNoAuth = errors.New("Authentication failure")
 
 // UnknownHostPortError is returned from GetMemcachedServiceAuth and
 // GetHTTPServiceAuth calls for unknown host:port arguments.

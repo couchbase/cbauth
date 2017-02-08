@@ -85,6 +85,11 @@ func InternalRetryDefaultInit(mgmtHostPort, user, password string) (bool, error)
 	return InternalRetryDefaultInitWithService(service, mgmtHostPort, user, password)
 }
 
+// InternalRetryDefaultInitWithService can be used by golang services that are
+// willing to perform manual initialization of cbauth (i.e. for easier
+// testing). This API is subject to change and should be used only if
+// really needed. Returns false if Default Authenticator was already
+// initialized.
 func InternalRetryDefaultInitWithService(service, mgmtHostPort, user, password string) (bool, error) {
 	if Default != nil {
 		return false, nil
