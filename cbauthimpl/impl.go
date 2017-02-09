@@ -160,12 +160,12 @@ func authBuiltinUsers(db *credsDB, user, password string) (bool, string) {
 
 // Svc is a struct that holds state of cbauth service.
 type Svc struct {
-	l         sync.Mutex
-	db        *credsDB
-	staleErr  error
-	freshChan chan struct{}
-	upCache   *userPermissionCache
-	cacheOnce sync.Once
+	l           sync.Mutex
+	db          *credsDB
+	staleErr    error
+	freshChan   chan struct{}
+	upCache     *LRUCache
+	upCacheOnce sync.Once
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -364,27 +364,34 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	return &rv, nil
 }
 
+type userPermission struct {
+	version    int
+	user       string
+	src        string
+	permission string
+}
+
 func checkPermission(s *Svc, user, source, permission string) (bool, error) {
 	db := fetchDB(s)
 	if db == nil {
 		return false, staleError(s)
 	}
 
-	s.cacheOnce.Do(func() { s.upCache = newPermissionCache(db.permissionsVersion) })
+	s.upCacheOnce.Do(func() { s.upCache = NewLRUCache(1024) })
 
-	s.upCache.maybeRefreshCache(db.permissionsVersion)
+	key := userPermission{db.permissionsVersion, user, source, permission}
 
-	allowed, found := s.upCache.lookup(user, source, permission)
+	allowed, found := s.upCache.Get(key)
 	if found {
-		return allowed, nil
+		return allowed.(bool), nil
 	}
 
-	allowed, err := checkPermissionOnServer(db, user, source, permission)
+	allowedOnServer, err := checkPermissionOnServer(db, user, source, permission)
 	if err != nil {
 		return false, err
 	}
-	s.upCache.set(user, source, permission, allowed, db.permissionsVersion)
-	return allowed, nil
+	s.upCache.Set(key, allowedOnServer)
+	return allowedOnServer, nil
 }
 
 func checkPermissionOnServer(db *credsDB, user, source, permission string) (bool, error) {
@@ -473,51 +480,4 @@ func GetCreds(s *Svc, host string, port int) (memcachedUser, user, pwd string, e
 		}
 	}
 	return
-}
-
-type userPermission struct {
-	user       string
-	src        string
-	permission string
-}
-
-type userPermissionCache struct {
-	sync.RWMutex
-	version int
-	m       map[userPermission]bool
-}
-
-func (c *userPermissionCache) clearNoLock() {
-	c.m = make(map[userPermission]bool)
-}
-
-func (c *userPermissionCache) maybeRefreshCache(version int) {
-	c.Lock()
-	if c.version != version {
-		c.clearNoLock()
-		c.version = version
-	}
-	c.Unlock()
-}
-
-func newPermissionCache(version int) (c *userPermissionCache) {
-	c = new(userPermissionCache)
-	c.clearNoLock()
-	c.version = version
-	return
-}
-
-func (c *userPermissionCache) lookup(user, src, permission string) (allowed, found bool) {
-	c.RLock()
-	allowed, found = c.m[userPermission{user, src, permission}]
-	c.RUnlock()
-	return
-}
-
-func (c *userPermissionCache) set(user, src, permission string, allowed bool, version int) {
-	c.Lock()
-	if c.version == version {
-		c.m[userPermission{user, src, permission}] = allowed
-	}
-	c.Unlock()
 }
