@@ -1,8 +1,6 @@
 package cbauth
 
 import (
-	"crypto/hmac"
-	"crypto/sha1"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -25,20 +23,6 @@ func must(err error) {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func hashPassword(password string, salt []byte) []byte {
-	h := hmac.New(sha1.New, salt)
-	h.Write([]byte(password))
-	return h.Sum(nil)
-}
-
-func mkUser(user, uType, password, salt string) (u cbauthimpl.User) {
-	u.User = user
-	u.Type = uType
-	u.Salt = []byte(salt)
-	u.Mac = hashPassword(password, u.Salt)
-	return
 }
 
 func newAuthForTest(body func(freshChan chan struct{}, timeoutBody func())) *authImpl {
@@ -249,143 +233,6 @@ func TestStale(t *testing.T) {
 
 }
 
-func doTestStaleThenAdmin(t *testing.T, updateBeforeTimer bool) {
-	defer applyRT(newTestingRT(t))()
-
-	timerchan := make(chan bool)
-	var freshChan chan struct{}
-	a := newAuthForTest(func(ch chan struct{}, timeoutBody func()) {
-		freshChan = ch
-		go func() {
-			<-timerchan
-			timeoutBody()
-		}()
-	})
-
-	updatechan := make(chan bool)
-	go func() {
-		c := newCache(a)
-		var users []cbauthimpl.User
-		users = append(users, mkUser("admin", "admin", "asdasd", "nacl"))
-		c.Users = users
-		<-updatechan
-		must(a.svc.UpdateDB(c, nil))
-		<-updatechan
-	}()
-
-	go func() {
-		freshChan <- struct{}{}
-		if !updateBeforeTimer {
-			close(timerchan)
-			return
-		}
-
-		updatechan <- true
-		updatechan <- true
-		close(timerchan)
-	}()
-
-	cred, err := a.Auth("admin", "asdasd")
-	if updateBeforeTimer {
-		must(err)
-		if ok, _ := cred.IsAllowed("cluster.admin.settings!write"); !ok {
-			t.Fatal("user admin must be recognised as admin")
-		}
-	} else {
-		if _, ok := err.(*DBStaleError); !ok {
-			t.Fatal("db must be stale")
-		}
-		updatechan <- true
-		updatechan <- true
-	}
-
-	if _, ok := <-timerchan; ok {
-		t.Fatal("timerchan must be closed")
-	}
-
-	cred, err = a.Auth("admin", "badpass")
-	if err != ErrNoAuth {
-		t.Fatalf("badpass must not work. Instead got: %v and %v", cred, err)
-	}
-
-	cred, err = a.Auth("admin", "asdasd")
-	must(err)
-	if ok, _ := cred.IsAllowed("cluster.admin.settings!write"); !ok {
-		t.Fatal("user admin must be recognised as admin")
-	}
-}
-
-func TestStaleThenAdminTimerCase(t *testing.T) {
-	doTestStaleThenAdmin(t, false)
-}
-
-func TestStaleThenAdminUpdateCase(t *testing.T) {
-	doTestStaleThenAdmin(t, true)
-}
-
-func mkBucket(name, pwd string) (rv cbauthimpl.Bucket) {
-	rv.Name = name
-	rv.Password = pwd
-	return
-}
-
-func canAccessBucket(c Creds, bucket string) bool {
-	return acc(c.IsAllowed("cluster.bucket[" + bucket + "].data!write"))
-}
-
-func TestBucketsAuth(t *testing.T) {
-	defer applyRT(newTestingRT(t))()
-
-	a := newAuth(0)
-	cache := newCache(a)
-	cache.Buckets = append(cbauthimpl.Cache{}.Buckets, mkBucket("default", ""), mkBucket("foo", "bar"))
-	must(a.svc.UpdateDB(cache, nil))
-
-	c, err := a.Auth("foo", "bar")
-	must(err)
-	if !canAccessBucket(c, "foo") {
-		t.Fatal("Expect foo access with right pw to work")
-	}
-	if canAccessBucket(c, "default") {
-		t.Fatal("Expect default access to not work when authed towards foo")
-	}
-	if canAccessBucket(c, "unknown") {
-		t.Fatal("Expect unknown bucket access to not work")
-	}
-	assertAdmins(t, c, false, false)
-
-	c, err = a.Auth("foo", "notbar")
-	if err != ErrNoAuth {
-		t.Fatalf("Expect wrong password auth to fail. Got: %v and %v", c, err)
-	}
-
-	c, err = a.Auth("", "")
-	must(err)
-	assertAdmins(t, c, false, false)
-	if canAccessBucket(c, "foo") {
-		t.Fatal("Expect foo access to not work under anon auth")
-	}
-	if !canAccessBucket(c, "default") {
-		t.Fatal("Expect default access to work under anon auth")
-	}
-
-	// now somebody deletes no-password default bucket
-	must(a.svc.UpdateDB(&cbauthimpl.Cache{
-		Buckets: append(cbauthimpl.Cache{}.Buckets,
-			mkBucket("foo", "bar"))}, nil))
-	c, err = a.Auth("foo", "bar")
-	must(err)
-	assertAdmins(t, c, false, false)
-	if !canAccessBucket(c, "foo") {
-		t.Fatal("Expect foo access to work under right pw")
-	}
-	// and no password access should not work
-	c, err = a.Auth("", "")
-	if err != ErrNoAuth {
-		t.Fatalf("Expect no password access to fail after deletion of default bucket. Got: %v and %v", c, err)
-	}
-}
-
 func mkNode(host, user, pwd string, ports []int, local bool) (rv cbauthimpl.Node) {
 	rv.Host = host
 	rv.User = user
@@ -449,13 +296,6 @@ func TestTokenAdmin(t *testing.T) {
 
 	if c.Source() != "ns_server" {
 		t.Errorf("Expect source to be ns_server. Got %s", c.Source())
-	}
-
-	if !canAccessBucket(c, "asdasdasdasd") {
-		t.Errorf("Expected to be able to access all buckets. Failed at asdasdasdasd")
-	}
-	if !canAccessBucket(c, "ffee") {
-		t.Errorf("Expected to be able to access all buckets. Failed at ffee")
 	}
 }
 

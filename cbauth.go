@@ -17,7 +17,6 @@
 package cbauth
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -80,7 +79,7 @@ func (e *DBStaleError) Error() string {
 
 // ErrNoAuth is an error that is returned when the user credentials
 // are not recognized
-var ErrNoAuth = errors.New("Authentication failure")
+var ErrNoAuth = cbauthimpl.ErrNoAuth
 
 // UnknownHostPortError is returned from GetMemcachedServiceAuth and
 // GetHTTPServiceAuth calls for unknown host:port arguments.
@@ -90,61 +89,19 @@ func (s UnknownHostPortError) Error() string {
 	return fmt.Sprintf("Unable to find given hostport in cbauth database: `%s'", string(s))
 }
 
-func doOnServer(s *cbauthimpl.Svc, hdr http.Header) (Creds, error) {
-	rv, err := cbauthimpl.VerifyOnServer(s, hdr)
-	if rv == nil && err == nil {
-		return nil, ErrNoAuth
-	}
-	return rv, err
-}
-
-func doAuth(a *authImpl, user, pwd string, hdr http.Header) (Creds, error) {
-	ci, err := cbauthimpl.VerifyPassword(a.svc, user, pwd)
-	if err != nil {
-		return nil, err
-	}
-
-	if ci != nil {
-		return ci, nil
-	}
-
-	if user == "" {
-		return nil, ErrNoAuth
-	}
-
-	ldapEnabled, err := cbauthimpl.IsLDAPEnabled(a.svc)
-	if err != nil {
-		return nil, err
-	}
-
-	if !ldapEnabled {
-		return nil, ErrNoAuth
-	}
-
-	if hdr == nil {
-		req, err := http.NewRequest("GET", "http://host/", nil)
-		if err != nil {
-			panic("Must not happen: " + err.Error())
-		}
-		req.SetBasicAuth(user, pwd)
-		hdr = req.Header
-	}
-	return doOnServer(a.svc, hdr)
-}
-
 func (a *authImpl) AuthWebCreds(req *http.Request) (creds Creds, err error) {
 	if cbauthimpl.IsAuthTokenPresent(req) {
-		return doOnServer(a.svc, req.Header)
+		return cbauthimpl.VerifyOnServer(a.svc, req.Header)
 	}
 	user, pwd, err := ExtractCreds(req)
 	if err != nil {
 		return nil, err
 	}
-	return doAuth(a, user, pwd, req.Header)
+	return cbauthimpl.VerifyPassword(a.svc, user, pwd)
 }
 
 func (a *authImpl) Auth(user, pwd string) (creds Creds, err error) {
-	return doAuth(a, user, pwd, nil)
+	return cbauthimpl.VerifyPassword(a.svc, user, pwd)
 }
 
 func (a *authImpl) GetMemcachedServiceAuth(hostport string) (user, pwd string, err error) {

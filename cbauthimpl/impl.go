@@ -21,6 +21,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -28,6 +29,10 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrNoAuth is an error that is returned when the user credentials
+// are not recognized
+var ErrNoAuth = errors.New("Authentication failure")
 
 // Node struct is used as part of Cache messages to describe creds and
 // ports of some cluster node.
@@ -86,6 +91,7 @@ type credsDB struct {
 	specialUser        string
 	specialPassword    string
 	permissionsVersion int
+	authVersion        int
 	ldapEnabled        bool
 }
 
@@ -98,6 +104,7 @@ type Cache struct {
 	PermissionCheckURL string `json:"permissionCheckUrl"`
 	SpecialUser        string `json:"specialUser"`
 	PermissionsVersion int
+	AuthVersion        int
 	LDAPEnabled        bool
 }
 
@@ -160,12 +167,14 @@ func authBuiltinUsers(db *credsDB, user, password string) (bool, string) {
 
 // Svc is a struct that holds state of cbauth service.
 type Svc struct {
-	l           sync.Mutex
-	db          *credsDB
-	staleErr    error
-	freshChan   chan struct{}
-	upCache     *LRUCache
-	upCacheOnce sync.Once
+	l             sync.Mutex
+	db            *credsDB
+	staleErr      error
+	freshChan     chan struct{}
+	upCache       *LRUCache
+	upCacheOnce   sync.Once
+	authCache     *LRUCache
+	authCacheOnce sync.Once
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -179,6 +188,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		ldapEnabled:        c.LDAPEnabled,
 		specialUser:        c.SpecialUser,
 		permissionsVersion: c.PermissionsVersion,
+		authVersion:        c.AuthVersion,
 	}
 	for _, bucket := range c.Buckets {
 		if bucket.Password == "" {
@@ -311,8 +321,16 @@ func IsLDAPEnabled(s *Svc) (bool, error) {
 	return s.db.ldapEnabled, nil
 }
 
-// VerifyOnServer verifies auth of given request by passing it to
-// ns_server.
+func verifyPasswordOnServer(s *Svc, user, password string) (*CredsImpl, error) {
+	req, err := http.NewRequest("GET", "http://host/", nil)
+	if err != nil {
+		panic("Must not happen: " + err.Error())
+	}
+	req.SetBasicAuth(user, password)
+	return VerifyOnServer(s, req.Header)
+}
+
+// VerifyOnServer authenticates http request by calling POST /_cbauth REST endpoint
 func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	db := fetchDB(s)
 	if db == nil {
@@ -320,7 +338,7 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	}
 
 	if s.db.authCheckURL == "" {
-		return nil, nil
+		return nil, ErrNoAuth
 	}
 
 	req, err := http.NewRequest("POST", db.authCheckURL, nil)
@@ -339,7 +357,7 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	}
 	defer hresp.Body.Close()
 	if hresp.StatusCode == 401 {
-		return nil, nil
+		return nil, ErrNoAuth
 	}
 
 	if hresp.StatusCode != 200 {
@@ -422,6 +440,17 @@ func checkPermissionOnServer(db *credsDB, user, source, permission string) (bool
 	return false, fmt.Errorf("Unexpected return code %v", hresp.StatusCode)
 }
 
+type userPassword struct {
+	version  int
+	user     string
+	password string
+}
+
+type userIdentity struct {
+	user string
+	src  string
+}
+
 // VerifyPassword verifies given user/password creds against cbauth
 // password database. Returns nil, nil if given creds are not
 // recognised at all.
@@ -430,38 +459,40 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	if db == nil {
 		return nil, staleError(s)
 	}
-	rv := &CredsImpl{name: user, password: password, db: db, s: s}
 
 	if verifySpecialCreds(db, user, password) {
-		rv.source = "admin"
-		return rv, nil
+		return &CredsImpl{
+			name:     user,
+			password: password,
+			db:       db,
+			s:        s,
+			source:   "admin"}, nil
 	}
 
-	found, source := authBuiltinUsers(db, user, password)
+	s.authCacheOnce.Do(func() { s.authCache = NewLRUCache(256) })
+
+	key := userPassword{db.authVersion, user, password}
+
+	id, found := s.authCache.Get(key)
 	if found {
-		rv.source = source
-		return rv, nil
+		identity := id.(userIdentity)
+		return &CredsImpl{
+			name:     identity.user,
+			password: password,
+			db:       db,
+			s:        s,
+			source:   identity.src}, nil
 	}
 
-	if user == "" {
-		if !(password == "" && db.hasNoPwdBucket) {
-			// we only allow anonymous access if password
-			// is also empty and there is at least one
-			// no-password bucket
-			return nil, nil
-		}
-		rv.source = "anonymous"
-		return rv, nil
+	rv, err := verifyPasswordOnServer(s, user, password)
+	if err != nil {
+		return nil, err
 	}
 
-	if checkBucketPassword(db, user, password) {
-		// right now we only grant access if username
-		// matches specific bucket and bucket password
-		// is given
-		rv.source = "bucket"
-		return rv, nil
+	if rv.source == "admin" || rv.source == "builtin" {
+		s.upCache.Set(key, userIdentity{rv.name, rv.password})
 	}
-	return nil, nil
+	return rv, nil
 }
 
 // GetCreds returns service password for given host and port
