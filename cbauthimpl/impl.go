@@ -18,8 +18,6 @@
 package cbauthimpl
 
 import (
-	"crypto/hmac"
-	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,46 +64,24 @@ func getMemcachedCreds(n Node, host string, port int) (user, password string) {
 	return "", ""
 }
 
-// User struct is used as part of Cache messages to describe creds of
-// some user (admin or ro-admin).
-type User struct {
-	User string
-	Type string
-	Salt []byte
-	Mac  []byte
-}
-
-// Bucket struct is used as part of Cache messages to describe bucket auth
-type Bucket struct {
-	Name     string
-	Password string
-}
-
 type credsDB struct {
 	nodes              []Node
-	buckets            map[string]string
-	users              []User
-	hasNoPwdBucket     bool
 	authCheckURL       string
 	permissionCheckURL string
 	specialUser        string
 	specialPassword    string
 	permissionsVersion int
 	authVersion        int
-	ldapEnabled        bool
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
 type Cache struct {
 	Nodes              []Node
-	Buckets            []Bucket
-	Users              []User
 	AuthCheckURL       string `json:"authCheckUrl"`
 	PermissionCheckURL string `json:"permissionCheckUrl"`
 	SpecialUser        string `json:"specialUser"`
 	PermissionsVersion int
 	AuthVersion        int
-	LDAPEnabled        bool
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -141,30 +117,6 @@ func verifySpecialCreds(db *credsDB, user, password string) bool {
 	return len(user) > 0 && user[0] == '@' && password == db.specialPassword
 }
 
-func checkBucketPassword(db *credsDB, bucket, givenPassword string) bool {
-	// TODO: one day we'll care enough to do something like
-	// subtle.ConstantTimeCompare, but note that it's going to be
-	// trickier than just using that function alone. For that
-	// reason, I'm keeping away from trouble for now.
-	pwd, exists := db.buckets[bucket]
-	return exists && pwd == givenPassword
-}
-
-func verifyPassword(u *User, password string) bool {
-	mac := hmac.New(sha1.New, u.Salt)
-	mac.Write([]byte(password))
-	return hmac.Equal(u.Mac, mac.Sum(nil))
-}
-
-func authBuiltinUsers(db *credsDB, user, password string) (bool, string) {
-	for _, u := range db.users {
-		if u.User == user {
-			return verifyPassword(&u, password), u.Type
-		}
-	}
-	return false, ""
-}
-
 // Svc is a struct that holds state of cbauth service.
 type Svc struct {
 	l             sync.Mutex
@@ -180,21 +132,11 @@ type Svc struct {
 func cacheToCredsDB(c *Cache) (db *credsDB) {
 	db = &credsDB{
 		nodes:              c.Nodes,
-		buckets:            make(map[string]string),
-		users:              c.Users,
-		hasNoPwdBucket:     false,
 		authCheckURL:       c.AuthCheckURL,
 		permissionCheckURL: c.PermissionCheckURL,
-		ldapEnabled:        c.LDAPEnabled,
 		specialUser:        c.SpecialUser,
 		permissionsVersion: c.PermissionsVersion,
 		authVersion:        c.AuthVersion,
-	}
-	for _, bucket := range c.Buckets {
-		if bucket.Password == "" {
-			db.hasNoPwdBucket = true
-		}
-		db.buckets[bucket.Name] = bucket.Password
 	}
 	for _, node := range db.nodes {
 		if node.Local {
@@ -309,16 +251,6 @@ func copyHeader(name string, from, to http.Header) {
 	if val := from.Get(name); val != "" {
 		to.Set(name, val)
 	}
-}
-
-// IsLDAPEnabled returns true if ldap authentication is enabled
-// on ns_server
-func IsLDAPEnabled(s *Svc) (bool, error) {
-	db := fetchDB(s)
-	if db == nil {
-		return false, staleError(s)
-	}
-	return s.db.ldapEnabled, nil
 }
 
 func verifyPasswordOnServer(s *Svc, user, password string) (*CredsImpl, error) {
