@@ -422,7 +422,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	}
 
 	if rv.source == "admin" || rv.source == "builtin" {
-		s.upCache.Set(key, userIdentity{rv.name, rv.password})
+		s.authCache.Set(key, userIdentity{rv.name, rv.source})
 	}
 	return rv, nil
 }
