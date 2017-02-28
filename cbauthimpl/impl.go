@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -288,6 +289,8 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 		return nil, err
 	}
 	defer hresp.Body.Close()
+	defer io.Copy(ioutil.Discard, hresp.Body)
+
 	if hresp.StatusCode == 401 {
 		return nil, ErrNoAuth
 	}
@@ -362,6 +365,7 @@ func checkPermissionOnServer(db *credsDB, user, source, permission string) (bool
 		return false, err
 	}
 	defer hresp.Body.Close()
+	defer io.Copy(ioutil.Discard, hresp.Body)
 
 	switch hresp.StatusCode {
 	case 200:
