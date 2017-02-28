@@ -22,6 +22,7 @@ import (
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -365,6 +366,8 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 		return nil, err
 	}
 	defer hresp.Body.Close()
+	defer io.Copy(ioutil.Discard, hresp.Body)
+
 	if hresp.StatusCode == 401 {
 		return nil, nil
 	}
@@ -435,6 +438,7 @@ func checkPermissionOnServer(s *Svc, db *credsDB, user, source, permission strin
 		return false, err
 	}
 	defer hresp.Body.Close()
+	defer io.Copy(ioutil.Discard, hresp.Body)
 
 	switch hresp.StatusCode {
 	case 200:
