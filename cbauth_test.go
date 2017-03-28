@@ -21,6 +21,10 @@ func newAuth(initPeriod time.Duration) *authImpl {
 	return &authImpl{cbauthimpl.NewSVC(initPeriod, &DBStaleError{})}
 }
 
+func (a *authImpl) setTransport(rt http.RoundTripper) {
+	a.svc.SetTransport(rt)
+}
+
 func must(err error) {
 	if err != nil {
 		panic(err)
@@ -66,14 +70,6 @@ func assertAdmins(t *testing.T, c Creds, needAdmin, needROAdmin bool) {
 		acc(c.IsAllowed("cluster.admin.security!read"))
 	if roadmin != needROAdmin {
 		t.Fatalf("ro-admin access must be: %v", needROAdmin)
-	}
-}
-
-func applyRT(rt *testingRoundTripper) func() {
-	var old *http.Client
-	old, http.DefaultClient = http.DefaultClient, &http.Client{Transport: rt}
-	return func() {
-		http.DefaultClient = old
 	}
 }
 
@@ -249,8 +245,6 @@ func TestStale(t *testing.T) {
 }
 
 func doTestStaleThenAdmin(t *testing.T, updateBeforeTimer bool) {
-	defer applyRT(newTestingRT(t))()
-
 	timerchan := make(chan bool)
 	var freshChan chan struct{}
 	a := newAuthForTest(func(ch chan struct{}, timeoutBody func()) {
@@ -260,6 +254,7 @@ func doTestStaleThenAdmin(t *testing.T, updateBeforeTimer bool) {
 			timeoutBody()
 		}()
 	})
+	a.setTransport(newTestingRT(t))
 
 	updatechan := make(chan bool)
 	go func() {
@@ -331,9 +326,9 @@ func canAccessBucket(c Creds, bucket string) bool {
 }
 
 func TestBucketsAuth(t *testing.T) {
-	defer applyRT(newTestingRT(t))()
-
 	a := newAuth(0)
+	a.setTransport(newTestingRT(t))
+
 	cache := newCache(a)
 	cache.Buckets = append(cbauthimpl.Cache{}.Buckets, mkBucket("default", ""), mkBucket("foo", "bar"))
 	must(a.svc.UpdateDB(cache, nil))
@@ -424,9 +419,10 @@ func TestServicePwd(t *testing.T) {
 func TestTokenAdmin(t *testing.T) {
 	rt := newTestingRT(t)
 	rt.setTokenAuth("Administrator", "admin", "1234567890")
-	defer applyRT(rt)()
 
 	a := newAuth(0)
+	a.setTransport(rt)
+
 	must(a.svc.UpdateDB(newCache(a), nil))
 
 	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
