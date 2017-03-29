@@ -118,6 +118,16 @@ func verifySpecialCreds(db *credsDB, user, password string) bool {
 	return len(user) > 0 && user[0] == '@' && password == db.specialPassword
 }
 
+type semaphore chan int
+
+func (s semaphore) signal() {
+	<-s
+}
+
+func (s semaphore) wait() {
+	s <- 1
+}
+
 // Svc is a struct that holds state of cbauth service.
 type Svc struct {
 	l             sync.Mutex
@@ -128,6 +138,8 @@ type Svc struct {
 	upCacheOnce   sync.Once
 	authCache     *LRUCache
 	authCacheOnce sync.Once
+	httpClient    *http.Client
+	semaphore     semaphore
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -202,7 +214,17 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 	if staleErr == nil {
 		panic("staleErr must be non-nil")
 	}
-	s := &Svc{staleErr: staleErr}
+
+	s := &Svc{staleErr: staleErr, semaphore: make(semaphore, 10)}
+
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		panic("http.DefaultTransport not an *http.Transport")
+	}
+	customTransport := *defaultTransport
+	customTransport.MaxIdleConnsPerHost = 100
+	s.SetTransport(&customTransport)
+
 	if period != time.Duration(0) {
 		s.freshChan = make(chan struct{})
 		waitfn(period, s.freshChan, func() {
@@ -215,6 +237,11 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 		})
 	}
 	return s
+}
+
+// SetTransport allows to change RoundTripper for Svc
+func (s *Svc) SetTransport(rt http.RoundTripper) {
+	s.httpClient = &http.Client{Transport: rt}
 }
 
 func fetchDB(s *Svc) *credsDB {
@@ -274,6 +301,9 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 		return nil, ErrNoAuth
 	}
 
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
 	req, err := http.NewRequest("POST", db.authCheckURL, nil)
 	if err != nil {
 		panic(err)
@@ -284,7 +314,7 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	copyHeader("Cookie", reqHeaders, req.Header)
 	copyHeader("Authorization", reqHeaders, req.Header)
 
-	hresp, err := http.DefaultClient.Do(req)
+	hresp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +369,7 @@ func checkPermission(s *Svc, user, source, permission string) (bool, error) {
 		return allowed.(bool), nil
 	}
 
-	allowedOnServer, err := checkPermissionOnServer(db, user, source, permission)
+	allowedOnServer, err := checkPermissionOnServer(s, db, user, source, permission)
 	if err != nil {
 		return false, err
 	}
@@ -347,7 +377,10 @@ func checkPermission(s *Svc, user, source, permission string) (bool, error) {
 	return allowedOnServer, nil
 }
 
-func checkPermissionOnServer(db *credsDB, user, source, permission string) (bool, error) {
+func checkPermissionOnServer(s *Svc, db *credsDB, user, source, permission string) (bool, error) {
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
 	req, err := http.NewRequest("GET", db.permissionCheckURL, nil)
 	if err != nil {
 		return false, err
@@ -360,7 +393,7 @@ func checkPermissionOnServer(db *credsDB, user, source, permission string) (bool
 	v.Set("permission", permission)
 	req.URL.RawQuery = v.Encode()
 
-	hresp, err := http.DefaultClient.Do(req)
+	hresp, err := s.httpClient.Do(req)
 	if err != nil {
 		return false, err
 	}
