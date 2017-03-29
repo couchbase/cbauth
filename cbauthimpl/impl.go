@@ -154,6 +154,16 @@ func checkBucketPassword(db *credsDB, bucket, givenPassword string) bool {
 	return exists && pwd == givenPassword
 }
 
+type semaphore chan int
+
+func (s semaphore) signal() {
+	<-s
+}
+
+func (s semaphore) wait() {
+	s <- 1
+}
+
 // Svc is a struct that holds state of cbauth service.
 type Svc struct {
 	l          sync.Mutex
@@ -163,6 +173,7 @@ type Svc struct {
 	upCache    *userPermissionCache
 	cacheOnce  sync.Once
 	httpClient *http.Client
+	semaphore  semaphore
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -248,7 +259,7 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 		panic("staleErr must be non-nil")
 	}
 
-	s := &Svc{staleErr: staleErr}
+	s := &Svc{staleErr: staleErr, semaphore: make(semaphore, 10)}
 
 	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
@@ -336,6 +347,9 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 		return nil, nil
 	}
 
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
 	req, err := http.NewRequest("POST", db.authCheckURL, nil)
 	if err != nil {
 		panic(err)
@@ -401,6 +415,9 @@ func checkPermission(s *Svc, user, source, permission string) (bool, error) {
 }
 
 func checkPermissionOnServer(s *Svc, db *credsDB, user, source, permission string) (bool, error) {
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
 	req, err := http.NewRequest("GET", db.permissionCheckURL, nil)
 	if err != nil {
 		return false, err
