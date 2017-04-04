@@ -138,7 +138,7 @@ func doExecuteBasicSanityTest(log func(v ...interface{}), s *store) {
 	}
 	err = s.delete("/_sanity/key", nil)
 	noPanic(err)
-	v, r, err = s.get("/_sanity/key")
+	_, r, err = s.get("/_sanity/key")
 	noPanic(err)
 	if r != nil {
 		panic("expected key to be missing after successful delete")
