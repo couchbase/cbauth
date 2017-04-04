@@ -15,7 +15,7 @@
 
 // Package revrpc provides jsonrpc library that matches ns_server's
 // json_rpc_connection module. It allows golang service to connect to
-// ns_server and recieve jsonrpc requests via that connection.
+// ns_server and receive jsonrpc requests via that connection.
 package revrpc
 
 import (
