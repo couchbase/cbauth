@@ -301,7 +301,7 @@ readLoop:
 		case <-effCancel:
 			r.Body.Close()
 			// ensure that worker goroutine is done
-			for _ = range kveChan {
+			for range kveChan {
 			}
 			return nil
 		}
