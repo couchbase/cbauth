@@ -274,8 +274,13 @@ func TestSanity(t *testing.T) {
 	kv := &mockKV{}
 	defer kv.runMock()()
 
+	url, err := url.Parse(kv.srv.URL + "/_metakv")
+	if err != nil {
+		panic(err)
+	}
+
 	mockStore := &store{
-		url:    kv.srv.URL + "/_metakv",
+		url:    url,
 		client: http.DefaultClient,
 	}
 
