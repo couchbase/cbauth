@@ -217,13 +217,19 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 
 	s := &Svc{staleErr: staleErr, semaphore: make(semaphore, 10)}
 
-	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	dt, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
 		panic("http.DefaultTransport not an *http.Transport")
 	}
-	customTransport := *defaultTransport
-	customTransport.MaxIdleConnsPerHost = 100
-	s.SetTransport(&customTransport)
+	tr := &http.Transport{
+		Proxy:                 dt.Proxy,
+		DialContext:           dt.DialContext,
+		MaxIdleConns:          dt.MaxIdleConns,
+		MaxIdleConnsPerHost:   100,
+		IdleConnTimeout:       dt.IdleConnTimeout,
+		ExpectContinueTimeout: dt.ExpectContinueTimeout,
+	}
+	s.SetTransport(tr)
 
 	if period != time.Duration(0) {
 		s.freshChan = make(chan struct{})
