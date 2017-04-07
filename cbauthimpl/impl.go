@@ -229,7 +229,7 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 		IdleConnTimeout:       dt.IdleConnTimeout,
 		ExpectContinueTimeout: dt.ExpectContinueTimeout,
 	}
-	s.SetTransport(tr)
+	SetTransport(s, tr)
 
 	if period != time.Duration(0) {
 		s.freshChan = make(chan struct{})
@@ -246,7 +246,7 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 }
 
 // SetTransport allows to change RoundTripper for Svc
-func (s *Svc) SetTransport(rt http.RoundTripper) {
+func SetTransport(s *Svc, rt http.RoundTripper) {
 	s.httpClient = &http.Client{Transport: rt}
 }
 

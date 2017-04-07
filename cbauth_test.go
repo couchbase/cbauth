@@ -20,7 +20,7 @@ func newAuth(initPeriod time.Duration) *authImpl {
 }
 
 func (a *authImpl) setTransport(rt http.RoundTripper) {
-	a.svc.SetTransport(rt)
+	cbauthimpl.SetTransport(a.svc, rt)
 }
 
 func must(err error) {
