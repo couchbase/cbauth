@@ -29,9 +29,15 @@ import (
 	"time"
 )
 
+// CertRefreshCallback type describes callback for refreshing ssl certificate
+type CertRefreshCallback func() error
+
 // ErrNoAuth is an error that is returned when the user credentials
 // are not recognized
 var ErrNoAuth = errors.New("Authentication failure")
+
+// ErrNotInitialized is used to signal that certificate refresh callback is already registered
+var ErrCallbackAlreadyRegistered = errors.New("Certificate refresh callback is already registered")
 
 // Node struct is used as part of Cache messages to describe creds and
 // ports of some cluster node.
@@ -73,6 +79,7 @@ type credsDB struct {
 	specialPassword    string
 	permissionsVersion int
 	authVersion        int
+	certVersion        int
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
@@ -83,6 +90,7 @@ type Cache struct {
 	SpecialUser        string `json:"specialUser"`
 	PermissionsVersion int
 	AuthVersion        int
+	CertVersion        int
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -128,6 +136,83 @@ func (s semaphore) wait() {
 	s <- 1
 }
 
+type certNotifier struct {
+	l        sync.Mutex
+	ch       chan struct{}
+	callback CertRefreshCallback
+}
+
+func newCertNotifier() *certNotifier {
+	return &certNotifier{
+		ch: make(chan struct{}, 1),
+	}
+}
+
+func (n *certNotifier) notifyCertChangeLocked() {
+	select {
+	case n.ch <- struct{}{}:
+	default:
+	}
+}
+
+func (n *certNotifier) notifyCertChange() {
+	n.l.Lock()
+	defer n.l.Unlock()
+	n.notifyCertChangeLocked()
+}
+
+func (n *certNotifier) registerCallback(callback CertRefreshCallback) error {
+	n.l.Lock()
+	defer n.l.Unlock()
+
+	if n.callback != nil {
+		return ErrCallbackAlreadyRegistered
+	}
+
+	n.callback = callback
+	n.notifyCertChangeLocked()
+	return nil
+}
+
+func (n *certNotifier) getCallback() CertRefreshCallback {
+	n.l.Lock()
+	defer n.l.Unlock()
+
+	return n.callback
+}
+
+func (n *certNotifier) maybeExecuteCallback() error {
+	callback := n.getCallback()
+
+	if callback != nil {
+		return callback()
+	}
+	return nil
+}
+
+func (n *certNotifier) loop() {
+	retry := (<-chan time.Time)(nil)
+
+	for {
+		select {
+		case <-retry:
+			retry = nil
+		case <-n.ch:
+		}
+
+		err := n.maybeExecuteCallback()
+
+		if err == nil {
+			retry = nil
+			continue
+		}
+
+		if retry == nil {
+			retry = time.After(5 * time.Second)
+		}
+	}
+}
+
 // Svc is a struct that holds state of cbauth service.
 type Svc struct {
 	l             sync.Mutex
@@ -140,6 +225,7 @@ type Svc struct {
 	authCacheOnce sync.Once
 	httpClient    *http.Client
 	semaphore     semaphore
+	certNotifier  *certNotifier
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -150,6 +236,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		specialUser:        c.SpecialUser,
 		permissionsVersion: c.PermissionsVersion,
 		authVersion:        c.AuthVersion,
+		certVersion:        c.CertVersion,
 	}
 	for _, node := range db.nodes {
 		if node.Local {
@@ -177,6 +264,7 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 	// BUG(alk): consider some kind of CAS later
 	db := cacheToCredsDB(c)
 	s.l.Lock()
+	s.maybeRefreshCert(db)
 	updateDBLocked(s, db)
 	s.l.Unlock()
 	return nil
@@ -215,7 +303,11 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 		panic("staleErr must be non-nil")
 	}
 
-	s := &Svc{staleErr: staleErr, semaphore: make(semaphore, 10)}
+	s := &Svc{
+		staleErr:     staleErr,
+		semaphore:    make(semaphore, 10),
+		certNotifier: newCertNotifier(),
+	}
 
 	dt, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
@@ -242,12 +334,20 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 			s.l.Unlock()
 		})
 	}
+
+	go s.certNotifier.loop()
 	return s
 }
 
 // SetTransport allows to change RoundTripper for Svc
 func SetTransport(s *Svc, rt http.RoundTripper) {
 	s.httpClient = &http.Client{Transport: rt}
+}
+
+func (s *Svc) maybeRefreshCert(db *credsDB) {
+	if s.db == nil || s.db.certVersion != db.certVersion {
+		s.certNotifier.notifyCertChange()
+	}
 }
 
 func fetchDB(s *Svc) *credsDB {
@@ -486,4 +586,9 @@ func GetCreds(s *Svc, host string, port int) (memcachedUser, user, pwd string, e
 		}
 	}
 	return
+}
+
+// RegisterCertRefreshCallback registers callback for refreshing ssl certificate
+func RegisterCertRefreshCallback(s *Svc, callback CertRefreshCallback) error {
+	return s.certNotifier.registerCallback(callback)
 }

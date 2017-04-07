@@ -30,6 +30,9 @@ import (
 // as GetHTTPAuthHeader. Or even maybe RoundTrip. So that we can
 // handle digest auth
 
+// CertRefreshCallback type describes callback for refreshing ssl certificate
+type CertRefreshCallback cbauthimpl.CertRefreshCallback
+
 // Authenticator is main cbauth interface. It supports both incoming
 // and outgoing auth.
 type Authenticator interface {
@@ -43,6 +46,8 @@ type Authenticator interface {
 	// GetMemcachedServiceAuth returns user/password creds given
 	// "admin" access to given memcached service.
 	GetMemcachedServiceAuth(hostport string) (user, pwd string, err error)
+	// RegisterCertRefreshCallback registers callback for refreshing ssl certificate
+	RegisterCertRefreshCallback(callback CertRefreshCallback) error
 }
 
 // Creds type represents credentials and answers queries on this creds
@@ -126,6 +131,10 @@ func (a *authImpl) GetHTTPServiceAuth(hostport string) (user, pwd string, err er
 		return "", "", UnknownHostPortError(hostport)
 	}
 	return
+}
+
+func (a *authImpl) RegisterCertRefreshCallback(callback CertRefreshCallback) error {
+	return cbauthimpl.RegisterCertRefreshCallback(a.svc, cbauthimpl.CertRefreshCallback(callback))
 }
 
 var _ Authenticator = (*authImpl)(nil)
