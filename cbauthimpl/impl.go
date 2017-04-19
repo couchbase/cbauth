@@ -96,7 +96,7 @@ type Cache struct {
 // CredsImpl implements cbauth.Creds interface.
 type CredsImpl struct {
 	name     string
-	source   string
+	domain   string
 	password string
 	db       *credsDB
 	s        *Svc
@@ -109,17 +109,17 @@ func (c *CredsImpl) Name() string {
 
 // Source method returns user source (for auditing)
 func (c *CredsImpl) Source() string {
-	switch c.source {
+	switch c.domain {
 	case "admin", "ro_admin":
 		return "ns_server"
 	}
-	return c.source
+	return c.domain
 }
 
 // IsAllowed method returns true if the permission is granted
 // for these credentials
 func (c *CredsImpl) IsAllowed(permission string) (bool, error) {
-	return checkPermission(c.s, c.name, c.source, permission)
+	return checkPermission(c.s, c.name, c.domain, permission)
 }
 
 func verifySpecialCreds(db *credsDB, user, password string) bool {
@@ -442,25 +442,25 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	}
 
 	resp := struct {
-		User, Source string
+		User, Domain string
 	}{}
 	err = json.Unmarshal(body, &resp)
 	if err != nil {
 		return nil, err
 	}
 
-	rv := CredsImpl{name: resp.User, source: resp.Source, db: db, s: s}
+	rv := CredsImpl{name: resp.User, domain: resp.Domain, db: db, s: s}
 	return &rv, nil
 }
 
 type userPermission struct {
 	version    int
 	user       string
-	src        string
+	domain     string
 	permission string
 }
 
-func checkPermission(s *Svc, user, source, permission string) (bool, error) {
+func checkPermission(s *Svc, user, domain, permission string) (bool, error) {
 	db := fetchDB(s)
 	if db == nil {
 		return false, staleError(s)
@@ -468,14 +468,14 @@ func checkPermission(s *Svc, user, source, permission string) (bool, error) {
 
 	s.upCacheOnce.Do(func() { s.upCache = NewLRUCache(1024) })
 
-	key := userPermission{db.permissionsVersion, user, source, permission}
+	key := userPermission{db.permissionsVersion, user, domain, permission}
 
 	allowed, found := s.upCache.Get(key)
 	if found {
 		return allowed.(bool), nil
 	}
 
-	allowedOnServer, err := checkPermissionOnServer(s, db, user, source, permission)
+	allowedOnServer, err := checkPermissionOnServer(s, db, user, domain, permission)
 	if err != nil {
 		return false, err
 	}
@@ -483,7 +483,7 @@ func checkPermission(s *Svc, user, source, permission string) (bool, error) {
 	return allowedOnServer, nil
 }
 
-func checkPermissionOnServer(s *Svc, db *credsDB, user, source, permission string) (bool, error) {
+func checkPermissionOnServer(s *Svc, db *credsDB, user, domain, permission string) (bool, error) {
 	s.semaphore.wait()
 	defer s.semaphore.signal()
 
@@ -495,7 +495,7 @@ func checkPermissionOnServer(s *Svc, db *credsDB, user, source, permission strin
 
 	v := url.Values{}
 	v.Set("user", user)
-	v.Set("src", source)
+	v.Set("domain", domain)
 	v.Set("permission", permission)
 	req.URL.RawQuery = v.Encode()
 
@@ -522,8 +522,8 @@ type userPassword struct {
 }
 
 type userIdentity struct {
-	user string
-	src  string
+	user   string
+	domain string
 }
 
 // VerifyPassword verifies given user/password creds against cbauth
@@ -541,7 +541,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 			password: password,
 			db:       db,
 			s:        s,
-			source:   "admin"}, nil
+			domain:   "admin"}, nil
 	}
 
 	s.authCacheOnce.Do(func() { s.authCache = NewLRUCache(256) })
@@ -556,7 +556,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 			password: password,
 			db:       db,
 			s:        s,
-			source:   identity.src}, nil
+			domain:   identity.domain}, nil
 	}
 
 	rv, err := verifyPasswordOnServer(s, user, password)
@@ -564,8 +564,8 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 		return nil, err
 	}
 
-	if rv.source == "admin" || rv.source == "builtin" {
-		s.authCache.Set(key, userIdentity{rv.name, rv.source})
+	if rv.domain == "admin" || rv.domain == "builtin" {
+		s.authCache.Set(key, userIdentity{rv.name, rv.domain})
 	}
 	return rv, nil
 }

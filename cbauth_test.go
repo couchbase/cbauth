@@ -70,7 +70,7 @@ type testingRoundTripper struct {
 	t       *testing.T
 	baseURL string
 	user    string
-	source  string
+	domain  string
 	token   string
 	tripped bool
 }
@@ -129,15 +129,15 @@ func (rt *testingRoundTripper) permissionsRoundTrip(req *http.Request) (res *htt
 	params := req.URL.Query()
 	permission := params["permission"]
 	user := params["user"]
-	src := params["src"]
+	domain := params["domain"]
 
-	if permission == nil || user == nil || src == nil {
+	if permission == nil || user == nil || domain == nil {
 		log.Fatalf("Missing parameters in request: %s", req.URL.String())
 	}
 
 	statusCode := 401
 
-	switch src[0] {
+	switch domain[0] {
 	case "admin":
 		statusCode = 200
 	case "bucket":
@@ -172,7 +172,7 @@ func (rt *testingRoundTripper) authRoundTrip(req *http.Request) (res *http.Respo
 
 	response := ""
 	if statusCode == 200 {
-		response = fmt.Sprintf(`{"user": "%s", "source": "%s"}`, rt.user, rt.source)
+		response = fmt.Sprintf(`{"user": "%s", "domain": "%s"}`, rt.user, rt.domain)
 	}
 
 	return respond(req, statusCode, response), nil
@@ -184,9 +184,9 @@ func (rt *testingRoundTripper) assertTripped(t *testing.T, expected bool) {
 	}
 }
 
-func (rt *testingRoundTripper) setTokenAuth(user, source, token string) {
+func (rt *testingRoundTripper) setTokenAuth(user, domain, token string) {
 	rt.token = token
-	rt.source = source
+	rt.domain = domain
 	rt.user = user
 }
 
