@@ -564,7 +564,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 		return nil, err
 	}
 
-	if rv.domain == "admin" || rv.domain == "builtin" {
+	if rv.domain == "admin" || rv.domain == "local" {
 		s.authCache.Set(key, userIdentity{rv.name, rv.domain})
 	}
 	return rv, nil
