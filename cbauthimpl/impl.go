@@ -107,13 +107,20 @@ func (c *CredsImpl) Name() string {
 	return c.name
 }
 
-// Source method returns user source (for auditing)
-func (c *CredsImpl) Source() string {
+// Domain method returns user domain (for auditing)
+func (c *CredsImpl) Domain() string {
 	switch c.domain {
 	case "admin", "ro_admin":
 		return "ns_server"
 	}
 	return c.domain
+}
+
+// Source method returns user source (for auditing)
+//
+// Deprecated: replaced with Domain() and soon to be deleted
+func (c *CredsImpl) Source() string {
+	return c.Domain()
 }
 
 // IsAllowed method returns true if the permission is granted

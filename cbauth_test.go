@@ -291,8 +291,8 @@ func TestTokenAdmin(t *testing.T) {
 		t.Errorf("Expect name to be Administrator")
 	}
 
-	if c.Source() != "ns_server" {
-		t.Errorf("Expect source to be ns_server. Got %s", c.Source())
+	if c.Domain() != "ns_server" {
+		t.Errorf("Expect source to be ns_server. Got %s", c.Domain())
 	}
 }
 

@@ -56,7 +56,11 @@ type Authenticator interface {
 type Creds interface {
 	// Name method returns user name (e.g. for auditing)
 	Name() string
+	// Domain method returns user domain (for auditing)
+	Domain() string
 	// Source method returns user source (for auditing)
+	//
+	// Deprecated: replaced with Domain() and soon to be deleted
 	Source() string
 	// IsAllowed method returns true if the permission is granted
 	// for these credentials
