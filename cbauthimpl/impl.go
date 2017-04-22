@@ -116,13 +116,6 @@ func (c *CredsImpl) Domain() string {
 	return c.domain
 }
 
-// Source method returns user source (for auditing)
-//
-// Deprecated: replaced with Domain() and soon to be deleted
-func (c *CredsImpl) Source() string {
-	return c.Domain()
-}
-
 // IsAllowed method returns true if the permission is granted
 // for these credentials
 func (c *CredsImpl) IsAllowed(permission string) (bool, error) {
