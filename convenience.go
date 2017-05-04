@@ -88,7 +88,7 @@ func WrapHTTPTransport(transport http.RoundTripper, a Authenticator) http.RoundT
 // SendUnauthorized sends 401 Unauthorized response on given response writer.
 func SendUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", "Basic realm=\"Couchbase\"")
-	http.Error(w, "need auth", http.StatusUnauthorized)
+	http.Error(w, "Authentication Failure.", http.StatusUnauthorized)
 }
 
 // ForbiddenJSON returns json 403 response for given permission
