@@ -77,8 +77,8 @@ type credsDB struct {
 	permissionCheckURL string
 	specialUser        string
 	specialPassword    string
-	permissionsVersion int
-	authVersion        int
+	permissionsVersion string
+	authVersion        string
 	certVersion        int
 }
 
@@ -88,8 +88,8 @@ type Cache struct {
 	AuthCheckURL       string `json:"authCheckUrl"`
 	PermissionCheckURL string `json:"permissionCheckUrl"`
 	SpecialUser        string `json:"specialUser"`
-	PermissionsVersion int
-	AuthVersion        int
+	PermissionsVersion string
+	AuthVersion        string
 	CertVersion        int
 }
 
@@ -454,7 +454,7 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 }
 
 type userPermission struct {
-	version    int
+	version    string
 	user       string
 	domain     string
 	permission string
@@ -516,7 +516,7 @@ func checkPermissionOnServer(s *Svc, db *credsDB, user, domain, permission strin
 }
 
 type userPassword struct {
-	version  int
+	version  string
 	user     string
 	password string
 }
