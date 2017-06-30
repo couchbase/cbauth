@@ -17,11 +17,11 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"os"
 	"sync"
 
 	"github.com/couchbase/cbauth/service"
+	log "github.com/couchbase/clog"
 )
 
 type Mgr struct {

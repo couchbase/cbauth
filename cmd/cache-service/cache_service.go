@@ -16,9 +16,9 @@ package main
 
 import (
 	"flag"
-	"log"
 
 	"github.com/couchbase/cbauth/service"
+	log "github.com/couchbase/clog"
 )
 
 func main() {

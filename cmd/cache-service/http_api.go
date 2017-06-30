@@ -17,11 +17,11 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"strings"
 
 	"github.com/couchbase/cbauth/service"
+	log "github.com/couchbase/clog"
 )
 
 type HTTPAPI struct {

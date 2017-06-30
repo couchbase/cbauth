@@ -20,14 +20,14 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
 	"errors"
 	"github.com/couchbase/cbauth"
-	"net/url"
+	log "github.com/couchbase/clog"
 )
 
 var mgmtURLFlag string

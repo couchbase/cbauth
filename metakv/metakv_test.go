@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	log "github.com/couchbase/clog"
 )
 
 type entry struct {

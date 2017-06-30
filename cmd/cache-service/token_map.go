@@ -17,12 +17,12 @@ package main
 import (
 	"encoding/json"
 	"hash/crc32"
-	"log"
 	"math/rand"
 	"sort"
 
 	"github.com/couchbase/cbauth/metakv"
 	"github.com/couchbase/cbauth/service"
+	log "github.com/couchbase/clog"
 )
 
 const (

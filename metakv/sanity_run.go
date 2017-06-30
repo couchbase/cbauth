@@ -1,8 +1,9 @@
 package metakv
 
 import (
-	"log"
 	"os"
+
+	log "github.com/couchbase/clog"
 )
 
 func init() {

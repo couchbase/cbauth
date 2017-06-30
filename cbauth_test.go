@@ -3,7 +3,6 @@ package cbauth
 import (
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/couchbase/cbauth/cbauthimpl"
 	"github.com/couchbase/cbauth/revrpc"
+	log "github.com/couchbase/clog"
 )
 
 func newAuth(initPeriod time.Duration) *authImpl {

@@ -16,9 +16,9 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 
 	"github.com/couchbase/cbauth/metakv"
+	log "github.com/couchbase/clog"
 )
 
 func MetakvGet(path string, v interface{}) bool {

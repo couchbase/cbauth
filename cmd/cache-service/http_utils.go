@@ -16,8 +16,9 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
+
+	log "github.com/couchbase/clog"
 )
 
 type Response struct {

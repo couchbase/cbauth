@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -33,6 +32,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	log "github.com/couchbase/clog"
 )
 
 // ServiceSetupCallback type defines functions that can be passed to

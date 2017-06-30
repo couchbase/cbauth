@@ -3,10 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/couchbase/cbauth"
+	log "github.com/couchbase/clog"
 	couchbase "github.com/couchbase/go-couchbase"
 )
 

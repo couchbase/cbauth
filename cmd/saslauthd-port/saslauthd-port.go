@@ -3,12 +3,12 @@ package main
 import (
 	"flag"
 	"io"
-	"log"
 	"net/rpc"
 	"os"
 
 	"github.com/couchbase/cbauth/revrpc"
 	"github.com/couchbase/cbauth/saslauthd"
+	log "github.com/couchbase/clog"
 )
 
 var (

@@ -1,12 +1,12 @@
 package main
 
 import (
-	"log"
 	"net/rpc"
 	"os"
 	"time"
 
 	"github.com/couchbase/cbauth/revrpc"
+	log "github.com/couchbase/clog"
 )
 
 // HelloMsg is example request type.
