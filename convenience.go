@@ -16,8 +16,11 @@
 package cbauth
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
+	"os"
+	"strings"
 )
 
 // SetRequestAuthVia sets basic auth header in given http request
@@ -111,4 +114,70 @@ func SendForbidden(w http.ResponseWriter, permission string) error {
 	w.WriteHeader(http.StatusForbidden)
 	w.Write(b)
 	return nil
+}
+
+var ciphersHigh = []uint16{
+	tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+	tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+	tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+	tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}
+
+var ciphersMedium = []uint16{
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+	tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}
+
+type tlsConfig struct {
+	MinTLSVersion   string
+	CiphersStrength []string
+}
+
+func getTLSConfig() tlsConfig {
+	res := tlsConfig{}
+	v := os.Getenv("CBAUTH_TLS_CONFIG")
+	if err := json.Unmarshal([]byte(v), &res); err != nil {
+		panic(err)
+	}
+	return res
+}
+
+func CipherSuites() []uint16 {
+	config := getTLSConfig()
+
+	high := false
+	medium := false
+
+	for _, val := range config.CiphersStrength {
+		val = strings.TrimSpace(val)
+		if strings.EqualFold(val, "high") {
+			high = true
+		} else if strings.EqualFold(val, "medium") {
+			medium = true
+		}
+	}
+
+	if high && medium {
+		return append(ciphersHigh, ciphersMedium...)
+	} else if medium {
+		return ciphersMedium
+	} else {
+		return ciphersHigh
+	}
+}
+
+func MinTLSVersion() uint16 {
+	config := getTLSConfig()
+
+	switch strings.ToLower(config.MinTLSVersion) {
+	case "tlsv1":
+		return tls.VersionTLS10
+	case "tlsv1.1":
+		return tls.VersionTLS11
+	case "tlsv1.2":
+		return tls.VersionTLS12
+	default:
+		return tls.VersionTLS10
+	}
 }
