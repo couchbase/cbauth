@@ -53,7 +53,10 @@ func matchHost(n Node, host string) bool {
 	if n.Host == "127.0.0.1" {
 		return true
 	}
-	if host == "127.0.0.1" && n.Local {
+	if n.Host == "::1" {
+		return true
+	}
+	if (host == "127.0.0.1" || host == "::1") && n.Local {
 		return true
 	}
 	return host == n.Host
