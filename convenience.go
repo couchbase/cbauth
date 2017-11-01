@@ -137,9 +137,12 @@ type tlsConfig struct {
 func getTLSConfig() tlsConfig {
 	res := tlsConfig{}
 	v := os.Getenv("CBAUTH_TLS_CONFIG")
-	if err := json.Unmarshal([]byte(v), &res); err != nil {
-		panic(err)
+	if len(strings.TrimSpace(v)) != 0 {
+		if err := json.Unmarshal([]byte(v), &res); err != nil {
+			panic(err)
+		}
 	}
+
 	return res
 }
 
