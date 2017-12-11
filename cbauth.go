@@ -17,6 +17,7 @@
 package cbauth
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 
@@ -48,6 +49,9 @@ type Authenticator interface {
 	GetMemcachedServiceAuth(hostport string) (user, pwd string, err error)
 	// RegisterCertRefreshCallback registers callback for refreshing ssl certificate
 	RegisterCertRefreshCallback(callback CertRefreshCallback) error
+	// GetClientCertAuthType returns the client certificate authentication
+	// type to be used by the web-server.
+	GetClientCertAuthType() (tls.ClientAuthType, error)
 }
 
 // Creds type represents credentials and answers queries on this creds
@@ -143,6 +147,10 @@ func (a *authImpl) GetHTTPServiceAuth(hostport string) (user, pwd string, err er
 
 func (a *authImpl) RegisterCertRefreshCallback(callback CertRefreshCallback) error {
 	return cbauthimpl.RegisterCertRefreshCallback(a.svc, cbauthimpl.CertRefreshCallback(callback))
+}
+
+func (a *authImpl) GetClientCertAuthType() (tls.ClientAuthType, error) {
+	return cbauthimpl.GetClientCertAuthType(a.svc)
 }
 
 var _ Authenticator = (*authImpl)(nil)

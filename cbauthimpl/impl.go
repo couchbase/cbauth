@@ -624,6 +624,15 @@ func RegisterCertRefreshCallback(s *Svc, callback CertRefreshCallback) error {
 	return s.certNotifier.registerCallback(callback)
 }
 
+func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return tls.NoClientCert, staleError(s)
+	}
+
+	return getAuthType(db.clientCertAuthState), nil
+}
+
 func getAuthType(state string) tls.ClientAuthType {
 	if state == "enable" {
 		return tls.VerifyClientCertIfGiven

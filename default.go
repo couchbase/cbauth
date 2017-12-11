@@ -16,6 +16,7 @@
 package cbauth
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -178,4 +179,11 @@ func RegisterCertRefreshCallback(callback CertRefreshCallback) error {
 	}
 	Default.RegisterCertRefreshCallback(callback)
 	return nil
+}
+
+func GetClientCertAuthType() (tls.ClientAuthType, error) {
+	if Default == nil {
+		return tls.NoClientCert, ErrNotInitialized
+	}
+	return Default.GetClientCertAuthType()
 }
