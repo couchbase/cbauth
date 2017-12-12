@@ -98,6 +98,14 @@ func (a *authImpl) AuthWebCreds(req *http.Request) (creds Creds, err error) {
 	if cbauthimpl.IsAuthTokenPresent(req) {
 		return cbauthimpl.VerifyOnServer(a.svc, req.Header)
 	}
+
+	rv, err := cbauthimpl.MaybeGetCredsFromCert(a.svc, req)
+	if err != nil {
+		return nil, err
+	} else if rv != nil {
+		return rv, nil
+	}
+
 	user, pwd, err := ExtractCreds(req)
 	if err != nil {
 		return nil, err

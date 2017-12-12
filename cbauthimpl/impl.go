@@ -18,6 +18,10 @@
 package cbauthimpl
 
 import (
+	"bytes"
+	"crypto/md5"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +42,9 @@ var ErrNoAuth = errors.New("Authentication failure")
 
 // ErrNotInitialized is used to signal that certificate refresh callback is already registered
 var ErrCallbackAlreadyRegistered = errors.New("Certificate refresh callback is already registered")
+
+// ErrUserNotFound is used to signal when username can't be extracted from client certificate.
+var ErrUserNotFound = errors.New("Username not found")
 
 // Node struct is used as part of Cache messages to describe creds and
 // ports of some cluster node.
@@ -224,17 +231,19 @@ func (n *certNotifier) loop() {
 
 // Svc is a struct that holds state of cbauth service.
 type Svc struct {
-	l             sync.Mutex
-	db            *credsDB
-	staleErr      error
-	freshChan     chan struct{}
-	upCache       *LRUCache
-	upCacheOnce   sync.Once
-	authCache     *LRUCache
-	authCacheOnce sync.Once
-	httpClient    *http.Client
-	semaphore     semaphore
-	certNotifier  *certNotifier
+	l                   sync.Mutex
+	db                  *credsDB
+	staleErr            error
+	freshChan           chan struct{}
+	upCache             *LRUCache
+	upCacheOnce         sync.Once
+	authCache           *LRUCache
+	authCacheOnce       sync.Once
+	clientCertCache     *LRUCache
+	clientCertCacheOnce sync.Once
+	httpClient          *http.Client
+	semaphore           semaphore
+	certNotifier        *certNotifier
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -433,6 +442,15 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	copyHeader("Cookie", reqHeaders, req.Header)
 	copyHeader("Authorization", reqHeaders, req.Header)
 
+	rv, err := executeReqAndGetCreds(s, db, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return rv, nil
+}
+
+func executeReqAndGetCreds(s *Svc, db *credsDB, req *http.Request) (*CredsImpl, error) {
 	hresp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -604,4 +622,87 @@ func GetCreds(s *Svc, host string, port int) (memcachedUser, user, pwd string, e
 // RegisterCertRefreshCallback registers callback for refreshing ssl certificate
 func RegisterCertRefreshCallback(s *Svc, callback CertRefreshCallback) error {
 	return s.certNotifier.registerCallback(callback)
+}
+
+func getAuthType(state string) tls.ClientAuthType {
+	if state == "enable" {
+		return tls.VerifyClientCertIfGiven
+	} else if state == "mandatory" {
+		return tls.RequireAndVerifyClientCert
+	} else {
+		return tls.NoClientCert
+	}
+}
+
+type clienCertHash struct {
+	hash    string
+	version string
+}
+
+func MaybeGetCredsFromCert(s *Svc, req *http.Request) (*CredsImpl, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return nil, staleError(s)
+	}
+
+	s.clientCertCacheOnce.Do(func() { s.clientCertCache = NewLRUCache(256) })
+	state := db.clientCertAuthState
+
+	if state == "disable" || state == "" {
+		return nil, nil
+	} else if state == "enable" && (req.TLS == nil || len(req.TLS.PeerCertificates) == 0) {
+		return nil, nil
+	} else if state == "mandatory" && (req.TLS == nil || len(req.TLS.PeerCertificates) == 0) {
+		return nil, errors.New("Request doesn't have a client certificate")
+	} else {
+		// The leaf certificate is the one which will have the username
+		// encoded into it and it's the first entry in 'PeerCertificates'.
+		cert := req.TLS.PeerCertificates[0]
+
+		h := md5.New()
+		h.Write(cert.Raw)
+		key := clienCertHash{
+			hash:    string(h.Sum(nil)),
+			version: db.clientCertAuthVersion,
+		}
+
+		val, found := s.clientCertCache.Get(key)
+		if found {
+			ui, _ := val.(*userIdentity)
+			creds := &CredsImpl{name: ui.user, domain: ui.domain, db: db, s: s}
+			return creds, nil
+		}
+
+		creds, _ := getUserIdentityFromCert(cert, db, s)
+		if creds != nil {
+			ui := &userIdentity{user: creds.name, domain: creds.domain}
+			s.clientCertCache.Set(key, interface{}(ui))
+			return creds, nil
+		}
+
+		return nil, ErrUserNotFound
+	}
+}
+
+func getUserIdentityFromCert(cert *x509.Certificate, db *credsDB, s *Svc) (*CredsImpl, error) {
+	if db.authCheckURL == "" {
+		return nil, ErrNoAuth
+	}
+
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
+	req, err := http.NewRequest("POST", db.extractUserFromCertURL, bytes.NewReader(cert.Raw))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", "application/octet-stream")
+	req.SetBasicAuth(db.specialUser, db.specialPassword)
+
+	rv, err := executeReqAndGetCreds(s, db, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return rv, nil
 }
