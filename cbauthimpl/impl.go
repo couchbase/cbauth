@@ -75,25 +75,31 @@ func getMemcachedCreds(n Node, host string, port int) (user, password string) {
 }
 
 type credsDB struct {
-	nodes              []Node
-	authCheckURL       string
-	permissionCheckURL string
-	specialUser        string
-	specialPassword    string
-	permissionsVersion string
-	authVersion        string
-	certVersion        int
+	nodes                  []Node
+	authCheckURL           string
+	permissionCheckURL     string
+	specialUser            string
+	specialPassword        string
+	permissionsVersion     string
+	authVersion            string
+	certVersion            int
+	extractUserFromCertURL string
+	clientCertAuthState    string
+	clientCertAuthVersion  string
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
 type Cache struct {
-	Nodes              []Node
-	AuthCheckURL       string `json:"authCheckUrl"`
-	PermissionCheckURL string `json:"permissionCheckUrl"`
-	SpecialUser        string `json:"specialUser"`
-	PermissionsVersion string
-	AuthVersion        string
-	CertVersion        int
+	Nodes                  []Node
+	AuthCheckURL           string `json:"authCheckUrl"`
+	PermissionCheckURL     string `json:"permissionCheckUrl"`
+	SpecialUser            string `json:"specialUser"`
+	PermissionsVersion     string
+	AuthVersion            string
+	CertVersion            int
+	ExtractUserFromCertURL string `json:"extractUserFromCertURL"`
+	ClientCertAuthState    string `json:"clientCertAuthState"`
+	ClientCertAuthVersion  string `json:"clientCertAuthVersion"`
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -233,13 +239,16 @@ type Svc struct {
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
 	db = &credsDB{
-		nodes:              c.Nodes,
-		authCheckURL:       c.AuthCheckURL,
-		permissionCheckURL: c.PermissionCheckURL,
-		specialUser:        c.SpecialUser,
-		permissionsVersion: c.PermissionsVersion,
-		authVersion:        c.AuthVersion,
-		certVersion:        c.CertVersion,
+		nodes:                  c.Nodes,
+		authCheckURL:           c.AuthCheckURL,
+		permissionCheckURL:     c.PermissionCheckURL,
+		specialUser:            c.SpecialUser,
+		permissionsVersion:     c.PermissionsVersion,
+		authVersion:            c.AuthVersion,
+		certVersion:            c.CertVersion,
+		extractUserFromCertURL: c.ExtractUserFromCertURL,
+		clientCertAuthState:    c.ClientCertAuthState,
+		clientCertAuthVersion:  c.ClientCertAuthVersion,
 	}
 	for _, node := range db.nodes {
 		if node.Local {
@@ -348,7 +357,8 @@ func SetTransport(s *Svc, rt http.RoundTripper) {
 }
 
 func (s *Svc) maybeRefreshCert(db *credsDB) {
-	if s.db == nil || s.db.certVersion != db.certVersion {
+	if s.db == nil || s.db.certVersion != db.certVersion ||
+		s.db.clientCertAuthState != db.clientCertAuthState {
 		s.certNotifier.notifyCertChange()
 	}
 }
