@@ -173,11 +173,19 @@ func GetMemcachedServiceAuth(hostport string) (user, pwd string, err error) {
 	return Default.GetMemcachedServiceAuth(hostport)
 }
 
-func RegisterCertRefreshCallback(callback CertRefreshCallback) error {
+func RegisterCertRefreshCallback(callback TLSRefreshCallback) error {
 	if Default == nil {
 		return ErrNotInitialized
 	}
 	Default.RegisterCertRefreshCallback(callback)
+	return nil
+}
+
+func RegisterTLSRefreshCallback(callback TLSRefreshCallback) error {
+	if Default == nil {
+		return ErrNotInitialized
+	}
+	Default.RegisterTLSRefreshCallback(callback)
 	return nil
 }
 

@@ -33,8 +33,9 @@ import (
 	"time"
 )
 
-// CertRefreshCallback type describes callback for refreshing ssl certificate
-type CertRefreshCallback func() error
+// TLSRefreshCallback type describes callback for reinitializing TLSConfig when ssl certificate
+// or client cert auth setting changes.
+type TLSRefreshCallback func() error
 
 // ErrNoAuth is an error that is returned when the user credentials
 // are not recognized
@@ -155,7 +156,7 @@ func (s semaphore) wait() {
 type certNotifier struct {
 	l        sync.Mutex
 	ch       chan struct{}
-	callback CertRefreshCallback
+	callback TLSRefreshCallback
 }
 
 func newCertNotifier() *certNotifier {
@@ -177,7 +178,7 @@ func (n *certNotifier) notifyCertChange() {
 	n.notifyCertChangeLocked()
 }
 
-func (n *certNotifier) registerCallback(callback CertRefreshCallback) error {
+func (n *certNotifier) registerCallback(callback TLSRefreshCallback) error {
 	n.l.Lock()
 	defer n.l.Unlock()
 
@@ -190,7 +191,7 @@ func (n *certNotifier) registerCallback(callback CertRefreshCallback) error {
 	return nil
 }
 
-func (n *certNotifier) getCallback() CertRefreshCallback {
+func (n *certNotifier) getCallback() TLSRefreshCallback {
 	n.l.Lock()
 	defer n.l.Unlock()
 
@@ -620,7 +621,12 @@ func GetCreds(s *Svc, host string, port int) (memcachedUser, user, pwd string, e
 }
 
 // RegisterCertRefreshCallback registers callback for refreshing ssl certificate
-func RegisterCertRefreshCallback(s *Svc, callback CertRefreshCallback) error {
+func RegisterCertRefreshCallback(s *Svc, callback TLSRefreshCallback) error {
+	return s.certNotifier.registerCallback(callback)
+}
+
+// RegisterTLSRefreshCallback registers callback for refreshing TLS config
+func RegisterTLSRefreshCallback(s *Svc, callback TLSRefreshCallback) error {
 	return s.certNotifier.registerCallback(callback)
 }
 

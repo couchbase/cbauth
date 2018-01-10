@@ -31,8 +31,9 @@ import (
 // as GetHTTPAuthHeader. Or even maybe RoundTrip. So that we can
 // handle digest auth
 
-// CertRefreshCallback type describes callback for refreshing ssl certificate
-type CertRefreshCallback cbauthimpl.CertRefreshCallback
+// TLSRefreshCallback type describes callback for reinitializing TLSConfig when ssl certificate
+// or client cert auth setting changes.
+type TLSRefreshCallback cbauthimpl.TLSRefreshCallback
 
 // Authenticator is main cbauth interface. It supports both incoming
 // and outgoing auth.
@@ -48,7 +49,12 @@ type Authenticator interface {
 	// "admin" access to given memcached service.
 	GetMemcachedServiceAuth(hostport string) (user, pwd string, err error)
 	// RegisterCertRefreshCallback registers callback for refreshing ssl certificate
-	RegisterCertRefreshCallback(callback CertRefreshCallback) error
+	// TODO: Remove RegisterCertRefreshCallback once all the services start using
+	//       RegisterTLSRefreshCallback API.
+	RegisterCertRefreshCallback(callback TLSRefreshCallback) error
+	// RegisterTLSRefreshCallback registers callback for refreshing TLS Config whenever
+	// SSL certificates are refreshed or when client certificate auth state is changed.
+	RegisterTLSRefreshCallback(callback TLSRefreshCallback) error
 	// GetClientCertAuthType returns the client certificate authentication
 	// type to be used by the web-server.
 	GetClientCertAuthType() (tls.ClientAuthType, error)
@@ -145,8 +151,12 @@ func (a *authImpl) GetHTTPServiceAuth(hostport string) (user, pwd string, err er
 	return
 }
 
-func (a *authImpl) RegisterCertRefreshCallback(callback CertRefreshCallback) error {
-	return cbauthimpl.RegisterCertRefreshCallback(a.svc, cbauthimpl.CertRefreshCallback(callback))
+func (a *authImpl) RegisterCertRefreshCallback(callback TLSRefreshCallback) error {
+	return cbauthimpl.RegisterCertRefreshCallback(a.svc, cbauthimpl.TLSRefreshCallback(callback))
+}
+
+func (a *authImpl) RegisterTLSRefreshCallback(callback TLSRefreshCallback) error {
+	return cbauthimpl.RegisterTLSRefreshCallback(a.svc, cbauthimpl.TLSRefreshCallback(callback))
 }
 
 func (a *authImpl) GetClientCertAuthType() (tls.ClientAuthType, error) {
