@@ -6,5 +6,5 @@ PROJECT(saslauthd-port)
 GoInstall(TARGET saslauthd-port
           PACKAGE github.com/couchbase/cbauth/cmd/saslauthd-port
           GOPATH "${CMAKE_SOURCE_DIR}/goproj" "${GODEPSDIR}"
-          GOVERSION 1.8.1
+          GOVERSION 1.8.5
           INSTALL_PATH bin)
