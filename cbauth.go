@@ -48,10 +48,6 @@ type Authenticator interface {
 	// GetMemcachedServiceAuth returns user/password creds given
 	// "admin" access to given memcached service.
 	GetMemcachedServiceAuth(hostport string) (user, pwd string, err error)
-	// RegisterCertRefreshCallback registers callback for refreshing ssl certificate
-	// TODO: Remove RegisterCertRefreshCallback once all the services start using
-	//       RegisterTLSRefreshCallback API.
-	RegisterCertRefreshCallback(callback TLSRefreshCallback) error
 	// RegisterTLSRefreshCallback registers callback for refreshing TLS Config whenever
 	// SSL certificates are refreshed or when client certificate auth state is changed.
 	RegisterTLSRefreshCallback(callback TLSRefreshCallback) error
@@ -149,10 +145,6 @@ func (a *authImpl) GetHTTPServiceAuth(hostport string) (user, pwd string, err er
 		return "", "", UnknownHostPortError(hostport)
 	}
 	return
-}
-
-func (a *authImpl) RegisterCertRefreshCallback(callback TLSRefreshCallback) error {
-	return cbauthimpl.RegisterCertRefreshCallback(a.svc, cbauthimpl.TLSRefreshCallback(callback))
 }
 
 func (a *authImpl) RegisterTLSRefreshCallback(callback TLSRefreshCallback) error {

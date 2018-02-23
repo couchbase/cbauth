@@ -620,11 +620,6 @@ func GetCreds(s *Svc, host string, port int) (memcachedUser, user, pwd string, e
 	return
 }
 
-// RegisterCertRefreshCallback registers callback for refreshing ssl certificate
-func RegisterCertRefreshCallback(s *Svc, callback TLSRefreshCallback) error {
-	return s.certNotifier.registerCallback(callback)
-}
-
 // RegisterTLSRefreshCallback registers callback for refreshing TLS config
 func RegisterTLSRefreshCallback(s *Svc, callback TLSRefreshCallback) error {
 	return s.certNotifier.registerCallback(callback)
