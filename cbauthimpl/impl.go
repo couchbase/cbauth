@@ -655,15 +655,18 @@ func MaybeGetCredsFromCert(s *Svc, req *http.Request) (*CredsImpl, error) {
 		return nil, staleError(s)
 	}
 
+	// If TLS is nil, then do nothing as it's an http request and not https.
+	if req.TLS == nil {
+		return nil, nil
+	}
+
 	s.clientCertCacheOnce.Do(func() { s.clientCertCache = NewLRUCache(256) })
 	state := db.clientCertAuthState
 
 	if state == "disable" || state == "" {
 		return nil, nil
-	} else if state == "enable" && (req.TLS == nil || len(req.TLS.PeerCertificates) == 0) {
+	} else if state == "enable" && len(req.TLS.PeerCertificates) == 0 {
 		return nil, nil
-	} else if state == "mandatory" && (req.TLS == nil || len(req.TLS.PeerCertificates) == 0) {
-		return nil, errors.New("Request doesn't have a client certificate")
 	} else {
 		// The leaf certificate is the one which will have the username
 		// encoded into it and it's the first entry in 'PeerCertificates'.
