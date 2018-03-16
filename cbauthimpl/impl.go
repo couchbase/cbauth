@@ -128,7 +128,7 @@ func (c *CredsImpl) Name() string {
 func (c *CredsImpl) Domain() string {
 	switch c.domain {
 	case "admin", "ro_admin":
-		return "ns_server"
+		return "builtin"
 	}
 	return c.domain
 }
