@@ -116,6 +116,9 @@ func (a *authImpl) AuthWebCreds(req *http.Request) (creds Creds, err error) {
 	if err != nil {
 		return nil, err
 	}
+	if user == "" && pwd == "" {
+		return nil, fmt.Errorf("No web credentials found in request.")
+	}
 	return cbauthimpl.VerifyPassword(a.svc, user, pwd)
 }
 
