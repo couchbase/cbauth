@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -58,13 +59,10 @@ type Node struct {
 }
 
 func matchHost(n Node, host string) bool {
-	if n.Host == "127.0.0.1" {
+	if net.ParseIP(n.Host).IsLoopback() {
 		return true
 	}
-	if n.Host == "::1" {
-		return true
-	}
-	if (host == "127.0.0.1" || host == "::1") && n.Local {
+	if net.ParseIP(host).IsLoopback() && n.Local {
 		return true
 	}
 	return host == n.Host
