@@ -59,13 +59,22 @@ type Node struct {
 }
 
 func matchHost(n Node, host string) bool {
-	if net.ParseIP(n.Host).IsLoopback() {
+	NodeHostIP := net.ParseIP(n.Host)
+	HostIP := net.ParseIP(host)
+
+	if NodeHostIP.IsLoopback() {
 		return true
 	}
-	if net.ParseIP(host).IsLoopback() && n.Local {
+	if HostIP.IsLoopback() && n.Local {
 		return true
 	}
-	return host == n.Host
+
+	// If both are IP addresses then use the standard API to check if they are equal.
+	if NodeHostIP != nil && HostIP != nil {
+		return HostIP.Equal(NodeHostIP)
+	} else {
+		return host == n.Host
+	}
 }
 
 func getMemcachedCreds(n Node, host string, port int) (user, password string) {
