@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -130,8 +131,8 @@ var ciphersMedium = []uint16{
 	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}
 
 type tlsConfig struct {
-	MinTLSVersion   string
-	CiphersStrength []string
+	MinTLSVersion string
+	Ciphers       []string
 }
 
 func getTLSConfig() tlsConfig {
@@ -148,23 +149,21 @@ func getTLSConfig() tlsConfig {
 
 func CipherSuites() []uint16 {
 	config := getTLSConfig()
+	var ciphers []uint16
 
-	high := false
-	medium := false
-
-	for _, val := range config.CiphersStrength {
+	for _, val := range config.Ciphers {
 		val = strings.TrimSpace(val)
 		if strings.EqualFold(val, "high") {
-			high = true
+			ciphers = append(ciphers, ciphersHigh...)
 		} else if strings.EqualFold(val, "medium") {
-			medium = true
+			ciphers = append(ciphers, ciphersMedium...)
+		} else if cipherId, err := strconv.ParseUint(val, 0, 16); err == nil {
+			ciphers = append(ciphers, uint16(cipherId))
 		}
 	}
 
-	if high && medium {
-		return append(ciphersHigh, ciphersMedium...)
-	} else if medium {
-		return ciphersMedium
+	if len(ciphers) > 0 {
+		return ciphers
 	} else {
 		return ciphersHigh
 	}
