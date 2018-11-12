@@ -133,6 +133,7 @@ var ciphersMedium = []uint16{
 type tlsConfig struct {
 	MinTLSVersion string
 	Ciphers       []string
+	CipherOrder   bool
 }
 
 func getTLSConfig() tlsConfig {
@@ -167,6 +168,11 @@ func CipherSuites() []uint16 {
 	} else {
 		return ciphersHigh
 	}
+}
+
+func CipherOrder() bool {
+	config := getTLSConfig()
+	return config.CipherOrder
 }
 
 func MinTLSVersion() uint16 {
