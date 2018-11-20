@@ -160,32 +160,32 @@ func (s semaphore) wait() {
 	s <- 1
 }
 
-type certNotifier struct {
+type tlsNotifier struct {
 	l        sync.Mutex
 	ch       chan struct{}
 	callback TLSRefreshCallback
 }
 
-func newCertNotifier() *certNotifier {
-	return &certNotifier{
+func newTlsNotifier() *tlsNotifier {
+	return &tlsNotifier{
 		ch: make(chan struct{}, 1),
 	}
 }
 
-func (n *certNotifier) notifyCertChangeLocked() {
+func (n *tlsNotifier) notifyTlsChangeLocked() {
 	select {
 	case n.ch <- struct{}{}:
 	default:
 	}
 }
 
-func (n *certNotifier) notifyCertChange() {
+func (n *tlsNotifier) notifyTlsChange() {
 	n.l.Lock()
 	defer n.l.Unlock()
-	n.notifyCertChangeLocked()
+	n.notifyTlsChangeLocked()
 }
 
-func (n *certNotifier) registerCallback(callback TLSRefreshCallback) error {
+func (n *tlsNotifier) registerCallback(callback TLSRefreshCallback) error {
 	n.l.Lock()
 	defer n.l.Unlock()
 
@@ -194,18 +194,18 @@ func (n *certNotifier) registerCallback(callback TLSRefreshCallback) error {
 	}
 
 	n.callback = callback
-	n.notifyCertChangeLocked()
+	n.notifyTlsChangeLocked()
 	return nil
 }
 
-func (n *certNotifier) getCallback() TLSRefreshCallback {
+func (n *tlsNotifier) getCallback() TLSRefreshCallback {
 	n.l.Lock()
 	defer n.l.Unlock()
 
 	return n.callback
 }
 
-func (n *certNotifier) maybeExecuteCallback() error {
+func (n *tlsNotifier) maybeExecuteCallback() error {
 	callback := n.getCallback()
 
 	if callback != nil {
@@ -214,7 +214,7 @@ func (n *certNotifier) maybeExecuteCallback() error {
 	return nil
 }
 
-func (n *certNotifier) loop() {
+func (n *tlsNotifier) loop() {
 	retry := (<-chan time.Time)(nil)
 
 	for {
@@ -251,7 +251,7 @@ type Svc struct {
 	clientCertCacheOnce sync.Once
 	httpClient          *http.Client
 	semaphore           semaphore
-	certNotifier        *certNotifier
+	tlsNotifier         *tlsNotifier
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -293,7 +293,7 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 	// BUG(alk): consider some kind of CAS later
 	db := cacheToCredsDB(c)
 	s.l.Lock()
-	s.maybeRefreshCert(db)
+	s.maybeRefreshTls(db)
 	updateDBLocked(s, db)
 	s.l.Unlock()
 	return nil
@@ -333,9 +333,9 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 	}
 
 	s := &Svc{
-		staleErr:     staleErr,
-		semaphore:    make(semaphore, 10),
-		certNotifier: newCertNotifier(),
+		staleErr:    staleErr,
+		semaphore:   make(semaphore, 10),
+		tlsNotifier: newTlsNotifier(),
 	}
 
 	dt, ok := http.DefaultTransport.(*http.Transport)
@@ -364,7 +364,7 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 		})
 	}
 
-	go s.certNotifier.loop()
+	go s.tlsNotifier.loop()
 	return s
 }
 
@@ -373,10 +373,10 @@ func SetTransport(s *Svc, rt http.RoundTripper) {
 	s.httpClient = &http.Client{Transport: rt}
 }
 
-func (s *Svc) maybeRefreshCert(db *credsDB) {
+func (s *Svc) maybeRefreshTls(db *credsDB) {
 	if s.db == nil || s.db.certVersion != db.certVersion ||
 		s.db.clientCertAuthState != db.clientCertAuthState {
-		s.certNotifier.notifyCertChange()
+		s.tlsNotifier.notifyTlsChange()
 	}
 }
 
@@ -629,7 +629,7 @@ func GetCreds(s *Svc, host string, port int) (memcachedUser, user, pwd string, e
 
 // RegisterTLSRefreshCallback registers callback for refreshing TLS config
 func RegisterTLSRefreshCallback(s *Svc, callback TLSRefreshCallback) error {
-	return s.certNotifier.registerCallback(callback)
+	return s.tlsNotifier.registerCallback(callback)
 }
 
 func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
