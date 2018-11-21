@@ -293,9 +293,12 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 	// BUG(alk): consider some kind of CAS later
 	db := cacheToCredsDB(c)
 	s.l.Lock()
-	s.maybeRefreshTls(db)
+	tlsUpdated := s.needRefreshTls(db)
 	updateDBLocked(s, db)
 	s.l.Unlock()
+	if tlsUpdated {
+		s.tlsNotifier.notifyTlsChange()
+	}
 	return nil
 }
 
@@ -373,11 +376,9 @@ func SetTransport(s *Svc, rt http.RoundTripper) {
 	s.httpClient = &http.Client{Transport: rt}
 }
 
-func (s *Svc) maybeRefreshTls(db *credsDB) {
-	if s.db == nil || s.db.certVersion != db.certVersion ||
-		s.db.clientCertAuthState != db.clientCertAuthState {
-		s.tlsNotifier.notifyTlsChange()
-	}
+func (s *Svc) needRefreshTls(db *credsDB) bool {
+	return s.db == nil || s.db.certVersion != db.certVersion ||
+		s.db.clientCertAuthState != db.clientCertAuthState
 }
 
 func fetchDB(s *Svc) *credsDB {
