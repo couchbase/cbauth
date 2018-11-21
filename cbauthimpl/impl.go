@@ -30,6 +30,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,6 +40,18 @@ import (
 // TLSRefreshCallback type describes callback for reinitializing TLSConfig when ssl certificate
 // or client cert auth setting changes.
 type TLSRefreshCallback func() error
+
+type TLSConfig struct {
+	MinTLSVersion uint16
+	Ciphers       []uint16
+	CipherOrder   bool
+}
+
+type tlsConfigImport struct {
+	MinTLSVersion string
+	Ciphers       []string
+	CipherOrder   bool
+}
 
 // ErrNoAuth is an error that is returned when the user credentials
 // are not recognized
@@ -101,6 +116,7 @@ type credsDB struct {
 	extractUserFromCertURL string
 	clientCertAuthState    string
 	clientCertAuthVersion  string
+	tlsConfig              TLSConfig
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
@@ -115,6 +131,7 @@ type Cache struct {
 	ExtractUserFromCertURL string `json:"extractUserFromCertURL"`
 	ClientCertAuthState    string `json:"clientCertAuthState"`
 	ClientCertAuthVersion  string `json:"clientCertAuthVersion"`
+	TlsConfig              tlsConfigImport
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -266,6 +283,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		extractUserFromCertURL: c.ExtractUserFromCertURL,
 		clientCertAuthState:    c.ClientCertAuthState,
 		clientCertAuthVersion:  c.ClientCertAuthVersion,
+		tlsConfig:              importTLSConfig(&c.TlsConfig),
 	}
 	for _, node := range db.nodes {
 		if node.Local {
@@ -378,7 +396,8 @@ func SetTransport(s *Svc, rt http.RoundTripper) {
 
 func (s *Svc) needRefreshTls(db *credsDB) bool {
 	return s.db == nil || s.db.certVersion != db.certVersion ||
-		s.db.clientCertAuthState != db.clientCertAuthState
+		s.db.clientCertAuthState != db.clientCertAuthState ||
+		!reflect.DeepEqual(s.db.tlsConfig, db.tlsConfig)
 }
 
 func fetchDB(s *Svc) *credsDB {
@@ -641,6 +660,69 @@ func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
 
 	return getAuthType(db.clientCertAuthState), nil
 }
+
+func importTLSConfig(cfg *tlsConfigImport) TLSConfig {
+	return TLSConfig{
+		MinTLSVersion: MinTLSVersion(cfg.MinTLSVersion),
+		Ciphers:       CipherSuites(cfg.Ciphers),
+		CipherOrder:   cfg.CipherOrder,
+	}
+}
+
+func GetTLSConfig(s *Svc) (TLSConfig, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return TLSConfig{}, staleError(s)
+	}
+	return db.tlsConfig, nil
+}
+
+func MinTLSVersion(str string) uint16 {
+	switch strings.ToLower(str) {
+	case "tlsv1":
+		return tls.VersionTLS10
+	case "tlsv1.1":
+		return tls.VersionTLS11
+	case "tlsv1.2":
+		return tls.VersionTLS12
+	default:
+		return tls.VersionTLS10
+	}
+}
+
+func CipherSuites(strs []string) []uint16 {
+	var ciphers []uint16
+
+	for _, val := range strs {
+		val = strings.TrimSpace(val)
+		if strings.EqualFold(val, "high") {
+			ciphers = append(ciphers, ciphersHigh...)
+		} else if strings.EqualFold(val, "medium") {
+			ciphers = append(ciphers, ciphersMedium...)
+		} else if cipherId, err := strconv.ParseUint(val, 0, 16); err == nil {
+			ciphers = append(ciphers, uint16(cipherId))
+		}
+	}
+
+	if len(ciphers) > 0 {
+		return ciphers
+	} else {
+		return ciphersHigh
+	}
+}
+
+var ciphersHigh = []uint16{
+	tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+	tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+	tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+	tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}
+
+var ciphersMedium = []uint16{
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+	tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}
 
 func getAuthType(state string) tls.ClientAuthType {
 	if state == "enable" {

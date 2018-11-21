@@ -16,11 +16,10 @@
 package cbauth
 
 import (
-	"crypto/tls"
 	"encoding/json"
+	"github.com/couchbase/cbauth/cbauthimpl"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 )
 
@@ -117,19 +116,6 @@ func SendForbidden(w http.ResponseWriter, permission string) error {
 	return nil
 }
 
-var ciphersHigh = []uint16{
-	tls.TLS_RSA_WITH_AES_128_CBC_SHA,
-	tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-	tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
-	tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}
-
-var ciphersMedium = []uint16{
-	tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-	tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}
-
 type tlsConfig struct {
 	MinTLSVersion string
 	Ciphers       []string
@@ -148,44 +134,21 @@ func getTLSConfig() tlsConfig {
 	return res
 }
 
+// Function is deprecated. Use cbauth.GetTLSConfig() instead
 func CipherSuites() []uint16 {
 	config := getTLSConfig()
-	var ciphers []uint16
-
-	for _, val := range config.Ciphers {
-		val = strings.TrimSpace(val)
-		if strings.EqualFold(val, "high") {
-			ciphers = append(ciphers, ciphersHigh...)
-		} else if strings.EqualFold(val, "medium") {
-			ciphers = append(ciphers, ciphersMedium...)
-		} else if cipherId, err := strconv.ParseUint(val, 0, 16); err == nil {
-			ciphers = append(ciphers, uint16(cipherId))
-		}
-	}
-
-	if len(ciphers) > 0 {
-		return ciphers
-	} else {
-		return ciphersHigh
-	}
+	return cbauthimpl.CipherSuites(config.Ciphers)
 }
 
+// Function is deprecated. Use cbauth.GetTLSConfig() instead
 func CipherOrder() bool {
 	config := getTLSConfig()
 	return config.CipherOrder
 }
 
+// Function is deprecated. Use cbauth.GetTLSConfig() instead
 func MinTLSVersion() uint16 {
 	config := getTLSConfig()
 
-	switch strings.ToLower(config.MinTLSVersion) {
-	case "tlsv1":
-		return tls.VersionTLS10
-	case "tlsv1.1":
-		return tls.VersionTLS11
-	case "tlsv1.2":
-		return tls.VersionTLS12
-	default:
-		return tls.VersionTLS10
-	}
+	return cbauthimpl.MinTLSVersion(config.MinTLSVersion)
 }

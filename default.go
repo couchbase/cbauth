@@ -187,3 +187,10 @@ func GetClientCertAuthType() (tls.ClientAuthType, error) {
 	}
 	return Default.GetClientCertAuthType()
 }
+
+func GetTLSConfig() (TLSConfig, error) {
+	if Default == nil {
+		return TLSConfig{}, ErrNotInitialized
+	}
+	return Default.GetTLSConfig()
+}

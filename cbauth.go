@@ -35,6 +35,8 @@ import (
 // or client cert auth setting changes.
 type TLSRefreshCallback cbauthimpl.TLSRefreshCallback
 
+type TLSConfig cbauthimpl.TLSConfig
+
 // Authenticator is main cbauth interface. It supports both incoming
 // and outgoing auth.
 type Authenticator interface {
@@ -54,6 +56,9 @@ type Authenticator interface {
 	// GetClientCertAuthType returns the client certificate authentication
 	// type to be used by the web-server.
 	GetClientCertAuthType() (tls.ClientAuthType, error)
+	// GetTLSConfig returns TLSConfig structure which includes cipher suites,
+	// min tls version, etc.
+	GetTLSConfig() (TLSConfig, error)
 }
 
 // Creds type represents credentials and answers queries on this creds
@@ -156,6 +161,11 @@ func (a *authImpl) RegisterTLSRefreshCallback(callback TLSRefreshCallback) error
 
 func (a *authImpl) GetClientCertAuthType() (tls.ClientAuthType, error) {
 	return cbauthimpl.GetClientCertAuthType(a.svc)
+}
+
+func (a *authImpl) GetTLSConfig() (TLSConfig, error) {
+	cfg, err := cbauthimpl.GetTLSConfig(a.svc)
+	return TLSConfig(cfg), err
 }
 
 var _ Authenticator = (*authImpl)(nil)
