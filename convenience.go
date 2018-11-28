@@ -16,11 +16,9 @@
 package cbauth
 
 import (
+	"crypto/tls"
 	"encoding/json"
-	"github.com/couchbase/cbauth/cbauthimpl"
 	"net/http"
-	"os"
-	"strings"
 )
 
 // SetRequestAuthVia sets basic auth header in given http request
@@ -116,39 +114,23 @@ func SendForbidden(w http.ResponseWriter, permission string) error {
 	return nil
 }
 
-type tlsConfig struct {
-	MinTLSVersion string
-	Ciphers       []string
-	CipherOrder   bool
-}
-
-func getTLSConfig() tlsConfig {
-	res := tlsConfig{}
-	v := os.Getenv("CBAUTH_TLS_CONFIG")
-	if len(strings.TrimSpace(v)) != 0 {
-		if err := json.Unmarshal([]byte(v), &res); err != nil {
-			panic(err)
-		}
-	}
-
-	return res
-}
-
 // Function is deprecated. Use cbauth.GetTLSConfig() instead
 func CipherSuites() []uint16 {
-	config := getTLSConfig()
-	return cbauthimpl.CipherSuites(config.Ciphers)
+	return []uint16{
+		tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+		tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+		tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+		tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+		tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}
 }
 
 // Function is deprecated. Use cbauth.GetTLSConfig() instead
 func CipherOrder() bool {
-	config := getTLSConfig()
-	return config.CipherOrder
+	return true
 }
 
 // Function is deprecated. Use cbauth.GetTLSConfig() instead
 func MinTLSVersion() uint16 {
-	config := getTLSConfig()
-
-	return cbauthimpl.MinTLSVersion(config.MinTLSVersion)
+	return tls.VersionTLS11
 }

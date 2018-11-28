@@ -31,7 +31,6 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,7 +48,7 @@ type TLSConfig struct {
 
 type tlsConfigImport struct {
 	MinTLSVersion string
-	Ciphers       []string
+	Ciphers       []uint16
 	CipherOrder   bool
 }
 
@@ -664,7 +663,7 @@ func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
 func importTLSConfig(cfg *tlsConfigImport) TLSConfig {
 	return TLSConfig{
 		MinTLSVersion: MinTLSVersion(cfg.MinTLSVersion),
-		Ciphers:       CipherSuites(cfg.Ciphers),
+		Ciphers:       append([]uint16{}, cfg.Ciphers...),
 		CipherOrder:   cfg.CipherOrder,
 	}
 }
@@ -689,40 +688,6 @@ func MinTLSVersion(str string) uint16 {
 		return tls.VersionTLS10
 	}
 }
-
-func CipherSuites(strs []string) []uint16 {
-	var ciphers []uint16
-
-	for _, val := range strs {
-		val = strings.TrimSpace(val)
-		if strings.EqualFold(val, "high") {
-			ciphers = append(ciphers, ciphersHigh...)
-		} else if strings.EqualFold(val, "medium") {
-			ciphers = append(ciphers, ciphersMedium...)
-		} else if cipherId, err := strconv.ParseUint(val, 0, 16); err == nil {
-			ciphers = append(ciphers, uint16(cipherId))
-		}
-	}
-
-	if len(ciphers) > 0 {
-		return ciphers
-	} else {
-		return ciphersHigh
-	}
-}
-
-var ciphersHigh = []uint16{
-	tls.TLS_RSA_WITH_AES_128_CBC_SHA,
-	tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-	tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
-	tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}
-
-var ciphersMedium = []uint16{
-	tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-	tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}
 
 func getAuthType(state string) tls.ClientAuthType {
 	if state == "enable" {
