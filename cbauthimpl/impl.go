@@ -41,15 +41,19 @@ import (
 type TLSRefreshCallback func() error
 
 type TLSConfig struct {
-	MinTLSVersion uint16
-	Ciphers       []uint16
-	CipherOrder   bool
+	MinTLSVersion      uint16
+	Ciphers            []uint16
+	CipherNames        []string
+	CipherOpenSSLNames []string
+	CipherOrder        bool
 }
 
 type tlsConfigImport struct {
-	MinTLSVersion string
-	Ciphers       []uint16
-	CipherOrder   bool
+	MinTLSVersion      string
+	Ciphers            []uint16
+	CipherNames        []string
+	CipherOpenSSLNames []string
+	CipherOrder        bool
 }
 
 // ErrNoAuth is an error that is returned when the user credentials
@@ -662,9 +666,11 @@ func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
 
 func importTLSConfig(cfg *tlsConfigImport) TLSConfig {
 	return TLSConfig{
-		MinTLSVersion: MinTLSVersion(cfg.MinTLSVersion),
-		Ciphers:       append([]uint16{}, cfg.Ciphers...),
-		CipherOrder:   cfg.CipherOrder,
+		MinTLSVersion:      MinTLSVersion(cfg.MinTLSVersion),
+		Ciphers:            append([]uint16{}, cfg.Ciphers...),
+		CipherNames:        append([]string{}, cfg.CipherNames...),
+		CipherOpenSSLNames: append([]string{}, cfg.CipherOpenSSLNames...),
+		CipherOrder:        cfg.CipherOrder,
 	}
 }
 
