@@ -41,11 +41,11 @@ import (
 type TLSRefreshCallback func() error
 
 type TLSConfig struct {
-	MinTLSVersion      uint16
-	Ciphers            []uint16
-	CipherNames        []string
-	CipherOpenSSLNames []string
-	CipherOrder        bool
+	MinVersion               uint16
+	CipherSuites             []uint16
+	CipherSuiteNames         []string
+	CipherSuiteOpenSSLNames  []string
+	PreferServerCipherSuites bool
 }
 
 type tlsConfigImport struct {
@@ -666,11 +666,11 @@ func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
 
 func importTLSConfig(cfg *tlsConfigImport) TLSConfig {
 	return TLSConfig{
-		MinTLSVersion:      MinTLSVersion(cfg.MinTLSVersion),
-		Ciphers:            append([]uint16{}, cfg.Ciphers...),
-		CipherNames:        append([]string{}, cfg.CipherNames...),
-		CipherOpenSSLNames: append([]string{}, cfg.CipherOpenSSLNames...),
-		CipherOrder:        cfg.CipherOrder,
+		MinVersion:               MinTLSVersion(cfg.MinTLSVersion),
+		CipherSuites:             append([]uint16{}, cfg.Ciphers...),
+		CipherSuiteNames:         append([]string{}, cfg.CipherNames...),
+		CipherSuiteOpenSSLNames:  append([]string{}, cfg.CipherOpenSSLNames...),
+		PreferServerCipherSuites: cfg.CipherOrder,
 	}
 }
 
