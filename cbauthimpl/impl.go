@@ -274,6 +274,29 @@ type Svc struct {
 	tlsNotifier         *tlsNotifier
 }
 
+func copyNodes(nodes []Node) []Node {
+	res := []Node{}
+	for _, node := range nodes {
+		nodeCopy := node
+		nodeCopy.Ports = append([]int{}, node.Ports...)
+		res = append(res, nodeCopy)
+	}
+	return res
+}
+
+func deepcopyDB(from *credsDB) *credsDB {
+	if from == nil {
+		return nil
+	}
+	to := new(credsDB)
+	*to = *from
+	to.nodes = copyNodes(from.nodes)
+	to.tlsConfig.CipherSuites = append([]uint16{}, from.tlsConfig.CipherSuites...)
+	to.tlsConfig.CipherSuiteNames = append([]string{}, from.tlsConfig.CipherSuiteNames...)
+	to.tlsConfig.CipherSuiteOpenSSLNames = append([]string{}, from.tlsConfig.CipherSuiteOpenSSLNames...)
+	return to
+}
+
 func cacheToCredsDB(c *Cache) (db *credsDB) {
 	db = &credsDB{
 		nodes:                  c.Nodes,
@@ -405,7 +428,7 @@ func (s *Svc) needRefreshTls(db *credsDB) bool {
 
 func fetchDB(s *Svc) *credsDB {
 	s.l.Lock()
-	db := s.db
+	db := deepcopyDB(s.db)
 	c := s.freshChan
 	s.l.Unlock()
 
@@ -419,7 +442,7 @@ func fetchDB(s *Svc) *credsDB {
 	// standpoint (we close channel), but helps a lot for tests
 	<-c
 	s.l.Lock()
-	db = s.db
+	db = deepcopyDB(s.db)
 	s.l.Unlock()
 
 	return db
