@@ -57,6 +57,7 @@ type Authenticator interface {
 	RegisterTLSRefreshCallback(callback TLSRefreshCallback) error
 	// GetClientCertAuthType returns the client certificate authentication
 	// type to be used by the web-server.
+	// Deprecated: Use cbauth.GetTLSConfig() instead.
 	GetClientCertAuthType() (tls.ClientAuthType, error)
 	// GetTLSConfig returns TLSConfig structure which includes cipher suites,
 	// min tls version, etc.

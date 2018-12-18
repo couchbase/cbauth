@@ -48,6 +48,7 @@ type TLSConfig struct {
 	CipherSuiteNames         []string
 	CipherSuiteOpenSSLNames  []string
 	PreferServerCipherSuites bool
+	ClientAuthType           tls.ClientAuthType
 }
 
 type tlsConfigImport struct {
@@ -118,7 +119,6 @@ type credsDB struct {
 	authVersion            string
 	certVersion            int
 	extractUserFromCertURL string
-	clientCertAuthState    string
 	clientCertAuthVersion  string
 	tlsConfig              TLSConfig
 }
@@ -285,9 +285,8 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		authVersion:            c.AuthVersion,
 		certVersion:            c.CertVersion,
 		extractUserFromCertURL: c.ExtractUserFromCertURL,
-		clientCertAuthState:    c.ClientCertAuthState,
 		clientCertAuthVersion:  c.ClientCertAuthVersion,
-		tlsConfig:              importTLSConfig(&c.TLSConfig),
+		tlsConfig:              importTLSConfig(&c.TLSConfig, c.ClientCertAuthState),
 	}
 	for _, node := range db.nodes {
 		if node.Local {
@@ -400,7 +399,6 @@ func SetTransport(s *Svc, rt http.RoundTripper) {
 
 func (s *Svc) needRefreshTLS(db *credsDB) bool {
 	return s.db == nil || s.db.certVersion != db.certVersion ||
-		s.db.clientCertAuthState != db.clientCertAuthState ||
 		!reflect.DeepEqual(s.db.tlsConfig, db.tlsConfig)
 }
 
@@ -663,16 +661,17 @@ func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
 		return tls.NoClientCert, staleError(s)
 	}
 
-	return getAuthType(db.clientCertAuthState), nil
+	return db.tlsConfig.ClientAuthType, nil
 }
 
-func importTLSConfig(cfg *tlsConfigImport) TLSConfig {
+func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig {
 	return TLSConfig{
 		MinVersion:               minTLSVersion(cfg.MinTLSVersion),
 		CipherSuites:             append([]uint16{}, cfg.Ciphers...),
 		CipherSuiteNames:         append([]string{}, cfg.CipherNames...),
 		CipherSuiteOpenSSLNames:  append([]string{}, cfg.CipherOpenSSLNames...),
 		PreferServerCipherSuites: cfg.CipherOrder,
+		ClientAuthType:           getAuthType(ClientCertAuthState),
 	}
 }
 
@@ -728,11 +727,11 @@ func MaybeGetCredsFromCert(s *Svc, req *http.Request) (*CredsImpl, error) {
 	}
 
 	s.clientCertCacheOnce.Do(func() { s.clientCertCache = NewLRUCache(256) })
-	state := db.clientCertAuthState
+	cAuthType := db.tlsConfig.ClientAuthType
 
-	if state == "disable" || state == "" {
+	if cAuthType == tls.NoClientCert {
 		return nil, nil
-	} else if state == "enable" && len(req.TLS.PeerCertificates) == 0 {
+	} else if cAuthType == tls.VerifyClientCertIfGiven && len(req.TLS.PeerCertificates) == 0 {
 		return nil, nil
 	} else {
 		// The leaf certificate is the one which will have the username
