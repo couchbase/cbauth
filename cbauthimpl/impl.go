@@ -40,6 +40,8 @@ import (
 // or client cert auth setting changes.
 type TLSRefreshCallback func() error
 
+// TLSConfig contains tls settings to be used by cbauth clients
+// When something in tls config changes user is notified via TLSRefreshCallback
 type TLSConfig struct {
 	MinVersion               uint16
 	CipherSuites             []uint16
@@ -60,7 +62,7 @@ type tlsConfigImport struct {
 // are not recognized
 var ErrNoAuth = errors.New("Authentication failure")
 
-// ErrNotInitialized is used to signal that certificate refresh callback is already registered
+// ErrCallbackAlreadyRegistered is used to signal that certificate refresh callback is already registered
 var ErrCallbackAlreadyRegistered = errors.New("Certificate refresh callback is already registered")
 
 // ErrUserNotFound is used to signal when username can't be extracted from client certificate.
@@ -90,9 +92,8 @@ func matchHost(n Node, host string) bool {
 	// If both are IP addresses then use the standard API to check if they are equal.
 	if NodeHostIP != nil && HostIP != nil {
 		return HostIP.Equal(NodeHostIP)
-	} else {
-		return host == n.Host
 	}
+	return host == n.Host
 }
 
 func getMemcachedCreds(n Node, host string, port int) (user, password string) {
@@ -131,10 +132,10 @@ type Cache struct {
 	PermissionsVersion     string
 	AuthVersion            string
 	CertVersion            int
-	ExtractUserFromCertURL string `json:"extractUserFromCertURL"`
-	ClientCertAuthState    string `json:"clientCertAuthState"`
-	ClientCertAuthVersion  string `json:"clientCertAuthVersion"`
-	TlsConfig              tlsConfigImport
+	ExtractUserFromCertURL string          `json:"extractUserFromCertURL"`
+	ClientCertAuthState    string          `json:"clientCertAuthState"`
+	ClientCertAuthVersion  string          `json:"clientCertAuthVersion"`
+	TLSConfig              tlsConfigImport `json:"tlsConfig"`
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -186,23 +187,23 @@ type tlsNotifier struct {
 	callback TLSRefreshCallback
 }
 
-func newTlsNotifier() *tlsNotifier {
+func newTLSNotifier() *tlsNotifier {
 	return &tlsNotifier{
 		ch: make(chan struct{}, 1),
 	}
 }
 
-func (n *tlsNotifier) notifyTlsChangeLocked() {
+func (n *tlsNotifier) notifyTLSChangeLocked() {
 	select {
 	case n.ch <- struct{}{}:
 	default:
 	}
 }
 
-func (n *tlsNotifier) notifyTlsChange() {
+func (n *tlsNotifier) notifyTLSChange() {
 	n.l.Lock()
 	defer n.l.Unlock()
-	n.notifyTlsChangeLocked()
+	n.notifyTLSChangeLocked()
 }
 
 func (n *tlsNotifier) registerCallback(callback TLSRefreshCallback) error {
@@ -214,7 +215,7 @@ func (n *tlsNotifier) registerCallback(callback TLSRefreshCallback) error {
 	}
 
 	n.callback = callback
-	n.notifyTlsChangeLocked()
+	n.notifyTLSChangeLocked()
 	return nil
 }
 
@@ -309,7 +310,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		extractUserFromCertURL: c.ExtractUserFromCertURL,
 		clientCertAuthState:    c.ClientCertAuthState,
 		clientCertAuthVersion:  c.ClientCertAuthVersion,
-		tlsConfig:              importTLSConfig(&c.TlsConfig),
+		tlsConfig:              importTLSConfig(&c.TLSConfig),
 	}
 	for _, node := range db.nodes {
 		if node.Local {
@@ -337,11 +338,11 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 	// BUG(alk): consider some kind of CAS later
 	db := cacheToCredsDB(c)
 	s.l.Lock()
-	tlsUpdated := s.needRefreshTls(db)
+	tlsUpdated := s.needRefreshTLS(db)
 	updateDBLocked(s, db)
 	s.l.Unlock()
 	if tlsUpdated {
-		s.tlsNotifier.notifyTlsChange()
+		s.tlsNotifier.notifyTLSChange()
 	}
 	return nil
 }
@@ -382,7 +383,7 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 	s := &Svc{
 		staleErr:    staleErr,
 		semaphore:   make(semaphore, 10),
-		tlsNotifier: newTlsNotifier(),
+		tlsNotifier: newTLSNotifier(),
 	}
 
 	dt, ok := http.DefaultTransport.(*http.Transport)
@@ -420,7 +421,7 @@ func SetTransport(s *Svc, rt http.RoundTripper) {
 	s.httpClient = &http.Client{Transport: rt}
 }
 
-func (s *Svc) needRefreshTls(db *credsDB) bool {
+func (s *Svc) needRefreshTLS(db *credsDB) bool {
 	return s.db == nil || s.db.certVersion != db.certVersion ||
 		s.db.clientCertAuthState != db.clientCertAuthState ||
 		!reflect.DeepEqual(s.db.tlsConfig, db.tlsConfig)
@@ -678,6 +679,7 @@ func RegisterTLSRefreshCallback(s *Svc, callback TLSRefreshCallback) error {
 	return s.tlsNotifier.registerCallback(callback)
 }
 
+// GetClientCertAuthType returns TLS cert type
 func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
 	db := fetchDB(s)
 	if db == nil {
@@ -689,7 +691,7 @@ func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
 
 func importTLSConfig(cfg *tlsConfigImport) TLSConfig {
 	return TLSConfig{
-		MinVersion:               MinTLSVersion(cfg.MinTLSVersion),
+		MinVersion:               minTLSVersion(cfg.MinTLSVersion),
 		CipherSuites:             append([]uint16{}, cfg.Ciphers...),
 		CipherSuiteNames:         append([]string{}, cfg.CipherNames...),
 		CipherSuiteOpenSSLNames:  append([]string{}, cfg.CipherOpenSSLNames...),
@@ -697,6 +699,8 @@ func importTLSConfig(cfg *tlsConfigImport) TLSConfig {
 	}
 }
 
+// GetTLSConfig returns current tls config that contains cipher suites,
+// min TLS version, etc.
 func GetTLSConfig(s *Svc) (TLSConfig, error) {
 	db := fetchDB(s)
 	if db == nil {
@@ -705,7 +709,7 @@ func GetTLSConfig(s *Svc) (TLSConfig, error) {
 	return db.tlsConfig, nil
 }
 
-func MinTLSVersion(str string) uint16 {
+func minTLSVersion(str string) uint16 {
 	switch strings.ToLower(str) {
 	case "tlsv1":
 		return tls.VersionTLS10
@@ -733,6 +737,8 @@ type clienCertHash struct {
 	version string
 }
 
+// MaybeGetCredsFromCert extracts user's credentials from certificate
+// Those returned credentials could be used for calling IsAllowed function
 func MaybeGetCredsFromCert(s *Svc, req *http.Request) (*CredsImpl, error) {
 	db := fetchDB(s)
 	if db == nil {

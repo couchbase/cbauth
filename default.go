@@ -173,6 +173,8 @@ func GetMemcachedServiceAuth(hostport string) (user, pwd string, err error) {
 	return Default.GetMemcachedServiceAuth(hostport)
 }
 
+// RegisterTLSRefreshCallback registers a callback to be called when any field
+// of TLS settings change. The callback is called in separate routine
 func RegisterTLSRefreshCallback(callback TLSRefreshCallback) error {
 	if Default == nil {
 		return ErrNotInitialized
@@ -181,6 +183,7 @@ func RegisterTLSRefreshCallback(callback TLSRefreshCallback) error {
 	return nil
 }
 
+// GetClientCertAuthType returns TLS cert type
 func GetClientCertAuthType() (tls.ClientAuthType, error) {
 	if Default == nil {
 		return tls.NoClientCert, ErrNotInitialized
@@ -188,6 +191,8 @@ func GetClientCertAuthType() (tls.ClientAuthType, error) {
 	return Default.GetClientCertAuthType()
 }
 
+// GetTLSConfig returns current tls config that contains cipher suites,
+// min TLS version, etc.
 func GetTLSConfig() (TLSConfig, error) {
 	if Default == nil {
 		return TLSConfig{}, ErrNotInitialized

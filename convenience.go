@@ -114,7 +114,7 @@ func SendForbidden(w http.ResponseWriter, permission string) error {
 	return nil
 }
 
-// Function is deprecated. Use cbauth.GetTLSConfig() instead
+// CipherSuites function is deprecated. Use cbauth.GetTLSConfig() instead
 func CipherSuites() []uint16 {
 	return []uint16{
 		tls.TLS_RSA_WITH_AES_128_CBC_SHA,
@@ -125,12 +125,12 @@ func CipherSuites() []uint16 {
 		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}
 }
 
-// Function is deprecated. Use cbauth.GetTLSConfig() instead
+// CipherOrder function is deprecated. Use cbauth.GetTLSConfig() instead
 func CipherOrder() bool {
 	return true
 }
 
-// Function is deprecated. Use cbauth.GetTLSConfig() instead
+// MinTLSVersion function is deprecated. Use cbauth.GetTLSConfig() instead
 func MinTLSVersion() uint16 {
 	return tls.VersionTLS11
 }

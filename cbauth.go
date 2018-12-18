@@ -35,6 +35,8 @@ import (
 // or client cert auth setting changes.
 type TLSRefreshCallback cbauthimpl.TLSRefreshCallback
 
+// TLSConfig contains tls settings to be used by cbauth clients
+// When something in tls config changes user is notified via TLSRefreshCallback
 type TLSConfig cbauthimpl.TLSConfig
 
 // Authenticator is main cbauth interface. It supports both incoming
@@ -122,7 +124,7 @@ func (a *authImpl) AuthWebCreds(req *http.Request) (creds Creds, err error) {
 		return nil, err
 	}
 	if user == "" && pwd == "" {
-		return nil, fmt.Errorf("No web credentials found in request.")
+		return nil, fmt.Errorf("no web credentials found in request")
 	}
 	return cbauthimpl.VerifyPassword(a.svc, user, pwd)
 }
