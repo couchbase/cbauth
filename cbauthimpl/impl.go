@@ -158,7 +158,6 @@ type CredsImpl struct {
 	name     string
 	domain   string
 	password string
-	db       *credsDB
 	s        *Svc
 }
 
@@ -581,7 +580,7 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	copyHeader("Cookie", reqHeaders, req.Header)
 	copyHeader("Authorization", reqHeaders, req.Header)
 
-	rv, err := executeReqAndGetCreds(s, db, req)
+	rv, err := executeReqAndGetCreds(s, req)
 	if err != nil {
 		return nil, err
 	}
@@ -589,7 +588,7 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	return rv, nil
 }
 
-func executeReqAndGetCreds(s *Svc, db *credsDB, req *http.Request) (*CredsImpl, error) {
+func executeReqAndGetCreds(s *Svc, req *http.Request) (*CredsImpl, error) {
 	hresp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -619,7 +618,7 @@ func executeReqAndGetCreds(s *Svc, db *credsDB, req *http.Request) (*CredsImpl, 
 		return nil, err
 	}
 
-	rv := CredsImpl{name: resp.User, domain: resp.Domain, db: db, s: s}
+	rv := CredsImpl{name: resp.User, domain: resp.Domain, s: s}
 	return &rv, nil
 }
 
@@ -709,7 +708,6 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 		return &CredsImpl{
 			name:     user,
 			password: password,
-			db:       db,
 			s:        s,
 			domain:   "admin"}, nil
 	}
@@ -724,7 +722,6 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 		return &CredsImpl{
 			name:     identity.user,
 			password: password,
-			db:       db,
 			s:        s,
 			domain:   identity.domain}, nil
 	}
@@ -863,7 +860,7 @@ func MaybeGetCredsFromCert(s *Svc, req *http.Request) (*CredsImpl, error) {
 		val, found := s.clientCertCache.Get(key)
 		if found {
 			ui, _ := val.(*userIdentity)
-			creds := &CredsImpl{name: ui.user, domain: ui.domain, db: db, s: s}
+			creds := &CredsImpl{name: ui.user, domain: ui.domain, s: s}
 			return creds, nil
 		}
 
@@ -893,7 +890,7 @@ func getUserIdentityFromCert(cert *x509.Certificate, db *credsDB, s *Svc) (*Cred
 	req.Header.Add("Content-Type", "application/octet-stream")
 	req.SetBasicAuth(db.specialUser, db.specialPassword)
 
-	rv, err := executeReqAndGetCreds(s, db, req)
+	rv, err := executeReqAndGetCreds(s, req)
 	if err != nil {
 		return nil, err
 	}
