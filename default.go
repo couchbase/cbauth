@@ -183,6 +183,14 @@ func RegisterTLSRefreshCallback(callback TLSRefreshCallback) error {
 	return nil
 }
 
+func RegisterConfigRefreshCallback(callback ConfigRefreshCallback) error {
+	if Default == nil {
+		return ErrNotInitialized
+	}
+	Default.RegisterConfigRefreshCallback(callback)
+	return nil
+}
+
 // GetClientCertAuthType returns TLS cert type
 func GetClientCertAuthType() (tls.ClientAuthType, error) {
 	if Default == nil {

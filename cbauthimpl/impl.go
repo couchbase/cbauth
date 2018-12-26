@@ -40,6 +40,21 @@ import (
 // or client cert auth setting changes.
 type TLSRefreshCallback func() error
 
+const (
+	CFG_CHANGE_CERTS_TLSCONFIG uint64 = 1 << iota
+	_MAX_CFG_CHANGE_FLAGS
+)
+
+// ConfigRefreshCallback type describes the callback called when any of the following
+// are updated:
+// 1. SSL certificates
+// 2. TLS configuration
+//
+// The clients are notified of the configuration changes by OR'ing
+// the appropriate flags defined above and passing them as an argument to the
+// callback function.
+type ConfigRefreshCallback func(uint64) error
+
 // TLSConfig contains tls settings to be used by cbauth clients
 // When something in tls config changes user is notified via TLSRefreshCallback
 type TLSConfig struct {
@@ -181,6 +196,87 @@ func (s semaphore) wait() {
 	s <- 1
 }
 
+type cfgChangeNotifier struct {
+	l        sync.Mutex
+	ch       chan uint64
+	callback ConfigRefreshCallback
+}
+
+func newCfgChangeNotifier() *cfgChangeNotifier {
+	return &cfgChangeNotifier{
+		ch: make(chan uint64, 1),
+	}
+}
+
+func (n *cfgChangeNotifier) notifyCfgChangeLocked(changes uint64) {
+	select {
+	case n.ch <- changes:
+	default:
+	}
+}
+
+func (n *cfgChangeNotifier) notifyCfgChange(changes uint64) {
+	n.l.Lock()
+	defer n.l.Unlock()
+	n.notifyCfgChangeLocked(changes)
+}
+
+func (n *cfgChangeNotifier) registerCallback(callback ConfigRefreshCallback) error {
+	n.l.Lock()
+	defer n.l.Unlock()
+
+	if n.callback != nil {
+		return ErrCallbackAlreadyRegistered
+	}
+
+	n.callback = callback
+	n.notifyCfgChangeLocked(_MAX_CFG_CHANGE_FLAGS - 1)
+	return nil
+}
+
+func (n *cfgChangeNotifier) getCallback() ConfigRefreshCallback {
+	n.l.Lock()
+	defer n.l.Unlock()
+
+	return n.callback
+}
+
+func (n *cfgChangeNotifier) maybeExecuteCallback(changes uint64) error {
+	callback := n.getCallback()
+
+	if callback != nil {
+		return callback(changes)
+	}
+	return nil
+}
+
+func (n *cfgChangeNotifier) loop() {
+	retry := (<-chan time.Time)(nil)
+	var changes uint64 = 0
+
+	for {
+		select {
+		case <-retry:
+			retry = nil
+		case changes = <-n.ch:
+		}
+
+		err := n.maybeExecuteCallback(changes)
+
+		if err == nil {
+			retry = nil
+			changes = 0
+			continue
+		}
+
+		if retry == nil {
+			retry = time.After(5 * time.Second)
+		}
+	}
+}
+
+// NOTE: Type 'tlsNotifier' will be removed when all the clients start
+//       using the new 'RegisterConfigRefreshCallback' API.
 type tlsNotifier struct {
 	l        sync.Mutex
 	ch       chan struct{}
@@ -273,6 +369,7 @@ type Svc struct {
 	httpClient          *http.Client
 	semaphore           semaphore
 	tlsNotifier         *tlsNotifier
+	cfgChangeNotifier   *cfgChangeNotifier
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -314,11 +411,12 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 	// BUG(alk): consider some kind of CAS later
 	db := cacheToCredsDB(c)
 	s.l.Lock()
-	tlsUpdated := s.needRefreshTLS(db)
+	cfgChanges := s.needConfigRefresh(db)
 	updateDBLocked(s, db)
 	s.l.Unlock()
-	if tlsUpdated {
+	if cfgChanges != 0 {
 		s.tlsNotifier.notifyTLSChange()
+		s.cfgChangeNotifier.notifyCfgChange(cfgChanges)
 	}
 	return nil
 }
@@ -357,9 +455,10 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 	}
 
 	s := &Svc{
-		staleErr:    staleErr,
-		semaphore:   make(semaphore, 10),
-		tlsNotifier: newTLSNotifier(),
+		staleErr:          staleErr,
+		semaphore:         make(semaphore, 10),
+		tlsNotifier:       newTLSNotifier(),
+		cfgChangeNotifier: newCfgChangeNotifier(),
 	}
 
 	dt, ok := http.DefaultTransport.(*http.Transport)
@@ -389,6 +488,7 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 	}
 
 	go s.tlsNotifier.loop()
+	go s.cfgChangeNotifier.loop()
 	return s
 }
 
@@ -397,9 +497,18 @@ func SetTransport(s *Svc, rt http.RoundTripper) {
 	s.httpClient = &http.Client{Transport: rt}
 }
 
-func (s *Svc) needRefreshTLS(db *credsDB) bool {
-	return s.db == nil || s.db.certVersion != db.certVersion ||
-		!reflect.DeepEqual(s.db.tlsConfig, db.tlsConfig)
+func (s *Svc) needConfigRefresh(db *credsDB) uint64 {
+	var changes uint64 = 0
+	if s.db == nil {
+		return _MAX_CFG_CHANGE_FLAGS - 1
+	}
+
+	if s.db.certVersion != db.certVersion ||
+		!reflect.DeepEqual(s.db.tlsConfig, db.tlsConfig) {
+		changes |= CFG_CHANGE_CERTS_TLSCONFIG
+	}
+
+	return changes
 }
 
 func fetchDB(s *Svc) *credsDB {
@@ -652,6 +761,12 @@ func GetCreds(s *Svc, host string, port int) (memcachedUser, user, pwd string, e
 // RegisterTLSRefreshCallback registers callback for refreshing TLS config
 func RegisterTLSRefreshCallback(s *Svc, callback TLSRefreshCallback) error {
 	return s.tlsNotifier.registerCallback(callback)
+}
+
+// RegisterConfigRefreshCallback registers callback for refreshing SSL certs
+// or TLS config.
+func RegisterConfigRefreshCallback(s *Svc, cb ConfigRefreshCallback) error {
+	return s.cfgChangeNotifier.registerCallback(cb)
 }
 
 // GetClientCertAuthType returns TLS cert type
