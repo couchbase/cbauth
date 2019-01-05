@@ -199,6 +199,14 @@ func GetClientCertAuthType() (tls.ClientAuthType, error) {
 	return Default.GetClientCertAuthType()
 }
 
+func GetClusterEncryptionConfig() (ClusterEncryptionConfig, error) {
+	if Default == nil {
+		return ClusterEncryptionConfig{}, ErrNotInitialized
+	}
+
+	return Default.GetClusterEncryptionConfig()
+}
+
 // GetTLSConfig returns current tls config that contains cipher suites,
 // min TLS version, etc.
 func GetTLSConfig() (TLSConfig, error) {

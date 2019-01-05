@@ -44,6 +44,7 @@ type TLSRefreshCallback func() error
 
 const (
 	CFG_CHANGE_CERTS_TLSCONFIG uint64 = 1 << iota
+	CFG_CHANGE_CLUSTER_ENCRYPTION
 	_MAX_CFG_CHANGE_FLAGS
 )
 
@@ -51,6 +52,7 @@ const (
 // are updated:
 // 1. SSL certificates
 // 2. TLS configuration
+// 3. Cluster encryption configuration
 //
 // The clients are notified of the configuration changes by OR'ing
 // the appropriate flags defined above and passing them as an argument to the
@@ -66,6 +68,13 @@ type TLSConfig struct {
 	CipherSuiteOpenSSLNames  []string
 	PreferServerCipherSuites bool
 	ClientAuthType           tls.ClientAuthType
+}
+
+// ClusterEncryptionConfig contains info about whether to use SSL ports for
+// communication channels and whether to disable non-SSL ports.
+type ClusterEncryptionConfig struct {
+	EncryptData        bool
+	DisableNonSSLPorts bool
 }
 
 type tlsConfigImport struct {
@@ -127,32 +136,34 @@ func getMemcachedCreds(n Node, host string, port int) (user, password string) {
 }
 
 type credsDB struct {
-	nodes                  []Node
-	authCheckURL           string
-	permissionCheckURL     string
-	specialUser            string
-	specialPassword        string
-	permissionsVersion     string
-	authVersion            string
-	certVersion            int
-	extractUserFromCertURL string
-	clientCertAuthVersion  string
-	tlsConfig              TLSConfig
+	nodes                   []Node
+	authCheckURL            string
+	permissionCheckURL      string
+	specialUser             string
+	specialPassword         string
+	permissionsVersion      string
+	authVersion             string
+	certVersion             int
+	extractUserFromCertURL  string
+	clientCertAuthVersion   string
+	clusterEncryptionConfig ClusterEncryptionConfig
+	tlsConfig               TLSConfig
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
 type Cache struct {
-	Nodes                  []Node
-	AuthCheckURL           string `json:"authCheckUrl"`
-	PermissionCheckURL     string `json:"permissionCheckUrl"`
-	SpecialUser            string `json:"specialUser"`
-	PermissionsVersion     string
-	AuthVersion            string
-	CertVersion            int
-	ExtractUserFromCertURL string          `json:"extractUserFromCertURL"`
-	ClientCertAuthState    string          `json:"clientCertAuthState"`
-	ClientCertAuthVersion  string          `json:"clientCertAuthVersion"`
-	TLSConfig              tlsConfigImport `json:"tlsConfig"`
+	Nodes                   []Node
+	AuthCheckURL            string `json:"authCheckUrl"`
+	PermissionCheckURL      string `json:"permissionCheckUrl"`
+	SpecialUser             string `json:"specialUser"`
+	PermissionsVersion      string
+	AuthVersion             string
+	CertVersion             int
+	ExtractUserFromCertURL  string                  `json:"extractUserFromCertURL"`
+	ClientCertAuthState     string                  `json:"clientCertAuthState"`
+	ClientCertAuthVersion   string                  `json:"clientCertAuthVersion"`
+	ClusterEncryptionConfig ClusterEncryptionConfig `json:"clusterEncryptionConfig"`
+	TLSConfig               tlsConfigImport         `json:"tlsConfig"`
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -375,16 +386,17 @@ type Svc struct {
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
 	db = &credsDB{
-		nodes:                  c.Nodes,
-		authCheckURL:           c.AuthCheckURL,
-		permissionCheckURL:     c.PermissionCheckURL,
-		specialUser:            c.SpecialUser,
-		permissionsVersion:     c.PermissionsVersion,
-		authVersion:            c.AuthVersion,
-		certVersion:            c.CertVersion,
-		extractUserFromCertURL: c.ExtractUserFromCertURL,
-		clientCertAuthVersion:  c.ClientCertAuthVersion,
-		tlsConfig:              importTLSConfig(&c.TLSConfig, c.ClientCertAuthState),
+		nodes:                   c.Nodes,
+		authCheckURL:            c.AuthCheckURL,
+		permissionCheckURL:      c.PermissionCheckURL,
+		specialUser:             c.SpecialUser,
+		permissionsVersion:      c.PermissionsVersion,
+		authVersion:             c.AuthVersion,
+		certVersion:             c.CertVersion,
+		extractUserFromCertURL:  c.ExtractUserFromCertURL,
+		clientCertAuthVersion:   c.ClientCertAuthVersion,
+		clusterEncryptionConfig: c.ClusterEncryptionConfig,
+		tlsConfig:               importTLSConfig(&c.TLSConfig, c.ClientCertAuthState),
 	}
 	for _, node := range db.nodes {
 		if node.Local {
@@ -507,6 +519,10 @@ func (s *Svc) needConfigRefresh(db *credsDB) uint64 {
 	if s.db.certVersion != db.certVersion ||
 		!reflect.DeepEqual(s.db.tlsConfig, db.tlsConfig) {
 		changes |= CFG_CHANGE_CERTS_TLSCONFIG
+	}
+
+	if s.db.clusterEncryptionConfig != db.clusterEncryptionConfig {
+		changes |= CFG_CHANGE_CLUSTER_ENCRYPTION
 	}
 
 	return changes
@@ -780,6 +796,17 @@ func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
 	}
 
 	return db.tlsConfig.ClientAuthType, nil
+}
+
+// GetClusterEncryptionConfig returns if cross node communication needs to be
+// encrypted and if non-SSL ports need to be disabled.
+func GetClusterEncryptionConfig(s *Svc) (ClusterEncryptionConfig, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return ClusterEncryptionConfig{}, staleError(s)
+	}
+
+	return db.clusterEncryptionConfig, nil
 }
 
 func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig {

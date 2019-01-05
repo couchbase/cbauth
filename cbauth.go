@@ -40,15 +40,20 @@ type TLSRefreshCallback cbauthimpl.TLSRefreshCallback
 // function registered using the 'RegisterConfigRefreshCallback' API.
 const (
 	CFG_CHANGE_CERTS_TLSCONFIG uint64 = 1 << iota
+	CFG_CHANGE_CLUSTER_ENCRYPTION
 )
 
 // ConfigRefreshCallback type describes the callback that is called when there is
-// a change in SSL certificates or TLS Config.
+// a change in SSL certificates or TLS Config or cluster encryption config.
 type ConfigRefreshCallback cbauthimpl.ConfigRefreshCallback
 
 // TLSConfig contains tls settings to be used by cbauth clients
 // When something in tls config changes user is notified via TLSRefreshCallback
 type TLSConfig cbauthimpl.TLSConfig
+
+// ClusterEncryptionConfig contains info about whether to use SSL ports for
+// communication channels and whether to disable non-SSL ports.
+type ClusterEncryptionConfig cbauthimpl.ClusterEncryptionConfig
 
 // Authenticator is main cbauth interface. It supports both incoming
 // and outgoing auth.
@@ -75,6 +80,10 @@ type Authenticator interface {
 	// type to be used by the web-server.
 	// Deprecated: Use cbauth.GetTLSConfig() instead.
 	GetClientCertAuthType() (tls.ClientAuthType, error)
+	// GetClusterEncryptionConfig returns ClusterEncryptionConfig which indicates
+	// whether the client should used SSL ports for communication and whether
+	// the unencrypted (non-SSL) ports should be disabled.
+	GetClusterEncryptionConfig() (ClusterEncryptionConfig, error)
 	// GetTLSConfig returns TLSConfig structure which includes cipher suites,
 	// min tls version, etc.
 	GetTLSConfig() (TLSConfig, error)
@@ -186,6 +195,11 @@ func (a *authImpl) RegisterConfigRefreshCallback(cb ConfigRefreshCallback) error
 
 func (a *authImpl) GetClientCertAuthType() (tls.ClientAuthType, error) {
 	return cbauthimpl.GetClientCertAuthType(a.svc)
+}
+
+func (a *authImpl) GetClusterEncryptionConfig() (ClusterEncryptionConfig, error) {
+	cfg, err := cbauthimpl.GetClusterEncryptionConfig(a.svc)
+	return ClusterEncryptionConfig(cfg), err
 }
 
 func (a *authImpl) GetTLSConfig() (TLSConfig, error) {
