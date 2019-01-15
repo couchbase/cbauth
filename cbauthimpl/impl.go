@@ -355,7 +355,7 @@ func (n *tlsNotifier) loop() {
 
 // Svc is a struct that holds state of cbauth service.
 type Svc struct {
-	l                   sync.Mutex
+	l                   sync.RWMutex
 	db                  *credsDB
 	staleErr            error
 	freshChan           chan struct{}
@@ -511,10 +511,10 @@ func (s *Svc) needConfigRefresh(db *credsDB) uint64 {
 }
 
 func fetchDB(s *Svc) *credsDB {
-	s.l.Lock()
+	s.l.RLock()
 	db := s.db
 	c := s.freshChan
-	s.l.Unlock()
+	s.l.RUnlock()
 
 	if db != nil || c == nil {
 		return db
@@ -525,9 +525,9 @@ func fetchDB(s *Svc) *credsDB {
 	// double receive doesn't change anything from correctness
 	// standpoint (we close channel), but helps a lot for tests
 	<-c
-	s.l.Lock()
+	s.l.RLock()
 	db = s.db
-	s.l.Unlock()
+	s.l.RUnlock()
 
 	return db
 }
