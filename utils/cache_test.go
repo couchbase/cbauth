@@ -13,89 +13,133 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !race
-
 package utils
 
 import (
+	"fmt"
 	"math/rand"
-	"sync"
+	"runtime"
+	"sync/atomic"
 	"testing"
 )
 
-func TestOneItem(t *testing.T) {
-	var wg sync.WaitGroup
+const (
+	cacheSize = 10240
+)
 
-	size := 256
-	threads := 10000
-	hits := 10000
+var (
+	threadConfigs  = []int{10, 100, 1000, 10000, 100000}
+	hitRateConfigs = []int{100, 99, 95, 90, 80}
+)
 
-	c := NewCache(size)
+func BenchmarkCacheGet(b *testing.B) {
+	c := NewCache(cacheSize)
 
-	c.Add("aa", "bb")
-
-	wg.Add(threads)
-
-	for i := 0; i < threads; i++ {
-		go func(num int) {
-			defer wg.Done()
-			for j := 0; j < hits; j++ {
-				_, success := c.Get("aa")
-				if !success {
-					t.Fatal("not found")
-				}
-			}
-		}(i)
+	for i := 0; i < cacheSize; i++ {
+		c.Add(i, i+13)
 	}
-	wg.Wait()
+
+	for _, threads := range threadConfigs {
+		threads, parallelism := adjustThreads(threads)
+		name := fmt.Sprintf("threads = %d", threads)
+
+		b.Run(name, func(b *testing.B) {
+			b.SetParallelism(parallelism)
+			b.RunParallel(func(pb *testing.PB) {
+				key := rand.Intn(cacheSize)
+				for pb.Next() {
+					v, found := c.Get(key)
+					if !found {
+						b.Fatalf("%d not found", key)
+					}
+
+					if v != key+13 {
+						b.Fatalf("bad value %d for %d",
+							v, key)
+					}
+
+					key = (key + 1) % cacheSize
+				}
+			})
+		})
+	}
+
 }
 
-func TestChaos(t *testing.T) {
-	var wg sync.WaitGroup
-
-	size := 250
-	values := 250
-	threads := 10000
-	hits := 10000
-
-	c := NewCache(size)
-
-	misses := make([]int, threads)
-
-	wg.Add(threads)
+func benchmarkCacheAddGet(b *testing.B, values int, parallelism int) {
+	c := NewCache(cacheSize)
 
 	for i := 0; i < values; i++ {
 		c.Add(i, i+13)
 	}
 
-	for i := 0; i < threads; i++ {
-		go func(num int, key int) {
-			defer wg.Done()
+	b.ResetTimer()
 
-			for j := 0; j < hits; j++ {
-				key = key + 1
-				if key >= values {
-					key = 0
-				}
-				value := key + 13
+	totalHits := uint64(0)
+	totalMisses := uint64(0)
 
-				res, success := c.Get(key)
-				if !success {
-					misses[num] = misses[num] + 1
-					c.Add(key, value)
-				} else if res != value {
-					t.Fatalf("value mismatch %d != %d",
+	b.SetParallelism(parallelism)
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		seed := rand.Int63()
+		rng := rand.New(rand.NewSource(seed))
+
+		hits := uint64(0)
+		misses := uint64(0)
+
+		for pb.Next() {
+			key := rng.Intn(values)
+			value := key + 13
+
+			res, success := c.Get(key)
+			if !success {
+				misses++
+				c.Add(key, value)
+			} else {
+				hits++
+
+				if res != value {
+					b.Fatalf("value mismatch %d != %d",
 						res, value)
 				}
 			}
-		}(i, rand.Intn(values))
-	}
-	wg.Wait()
 
-	totalHits := hits * threads
-	totalMisses := 0
-	for _, s := range misses {
-		totalMisses += s
+		}
+
+		atomic.AddUint64(&totalMisses, misses)
+		atomic.AddUint64(&totalHits, hits)
+	})
+
+	if testing.Verbose() {
+		b.Logf("Hits: %d, Misses: %d, Observed Hit Rate: %.2f%%",
+			totalHits, totalMisses,
+			100*float32(totalHits)/
+				float32(totalHits+totalMisses))
 	}
-	t.Logf("Hits: %d, Misses: %d", totalHits, totalMisses)
+}
+
+func BenchmarkCacheAddGet(b *testing.B) {
+	for _, hitRate := range hitRateConfigs {
+		values := cacheSize + (100-hitRate)*cacheSize/hitRate
+
+		for _, threads := range threadConfigs {
+			threads, parallelism := adjustThreads(threads)
+
+			name := fmt.Sprintf(
+				"threads = %d, hit rate = %d%%",
+				threads, hitRate)
+
+			b.Run(name, func(b *testing.B) {
+				benchmarkCacheAddGet(b, values, parallelism)
+			})
+		}
+	}
+}
+
+func adjustThreads(wanted int) (int, int) {
+	maxprocs := runtime.GOMAXPROCS(0)
+	parallelism := 1 + (wanted-1)/maxprocs
+
+	return parallelism * maxprocs, parallelism
 }
