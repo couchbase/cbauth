@@ -637,6 +637,10 @@ func checkPermission(s *Svc, user, domain, permission string) (bool, error) {
 
 	s.upCacheOnce.Do(func() { s.upCache = NewLRUCache(1024) })
 
+	if domain == "external" {
+		return checkPermissionOnServer(s, db, user, domain, permission)
+	}
+
 	key := userPermission{db.permissionsVersion, user, domain, permission}
 
 	allowed, found := s.upCache.Get(key)
