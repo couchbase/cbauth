@@ -16,46 +16,42 @@
 package utils
 
 import (
-	"container/list"
 	"sync"
 )
 
-type item struct {
-	key     interface{}
-	value   interface{}
-	lruElem *list.Element
-}
-
-// Cache implements simple LRU Cache
+// Cache implements simple cache optimized for concurrent reads. Items are
+// evicted in the order of their creation.
 type Cache struct {
 	sync.Mutex
-	lru   *list.List
-	items map[interface{}]*item
 
+	// Keys currently stored in the cache. Keys are added to the slice in
+	// the order of their creation wrapping around when maxSize is
+	// reached.
+	keys  []interface{}
+	items *Map
+
+	// Points to the position in the keys slice above where the next
+	// created key will get stored.
+	nextKey int
+
+	size    int
 	maxSize int
 }
 
 // NewCache creates new Cache
-func NewCache(size int) *Cache {
+func NewCache(maxSize int) *Cache {
 	return &Cache{
-		lru:     list.New(),
-		items:   make(map[interface{}]*item),
-		maxSize: size,
+		keys:    make([]interface{}, maxSize),
+		items:   new(Map),
+		nextKey: 0,
+		size:    0,
+		maxSize: maxSize,
 	}
 }
 
 // Get gets the value by key, returns (nil, false) if the value is not found
 func (c *Cache) Get(key interface{}) (interface{}, bool) {
-	c.Lock()
-	defer c.Unlock()
-
-	itm, ok := c.items[key]
-	if !ok {
-		return nil, false
-	}
-
-	c.touch(itm)
-	return itm.value, true
+	return c.items.Load(key)
 }
 
 // Add adds a key/value mapping to the cache if it doesn't already
@@ -64,37 +60,20 @@ func (c *Cache) Add(key interface{}, value interface{}) bool {
 	c.Lock()
 	defer c.Unlock()
 
-	_, ok := c.items[key]
-	if !ok {
-		c.create(key, value)
-		return true
+	_, loaded := c.items.LoadOrStore(key, value)
+	if loaded {
+		return false
 	}
 
-	return false
-}
-
-func (c *Cache) maybeEvict() {
-	if len(c.items) < c.maxSize {
-		return
+	if c.size < c.maxSize {
+		c.size++
+	} else {
+		victim := c.keys[c.nextKey]
+		c.items.Delete(victim)
 	}
 
-	victim := c.lru.Remove(c.lru.Front()).(*item)
-	delete(c.items, victim.key)
-}
+	c.keys[c.nextKey] = key
+	c.nextKey = (c.nextKey + 1) % c.maxSize
 
-func (c *Cache) create(key interface{}, value interface{}) {
-	c.maybeEvict()
-
-	itm := &item{
-		key:   key,
-		value: value,
-	}
-
-	itm.lruElem = c.lru.PushBack(itm)
-
-	c.items[key] = itm
-}
-
-func (c *Cache) touch(itm *item) {
-	c.lru.MoveToBack(itm.lruElem)
+	return true
 }
