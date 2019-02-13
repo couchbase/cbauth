@@ -1,5 +1,5 @@
 // @author Couchbase <info@couchbase.com>
-// @copyright 2015 Couchbase, Inc.
+// @copyright 2015-2019 Couchbase, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,6 +34,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/couchbase/cbauth/utils"
 )
 
 // TLSRefreshCallback type describes callback for reinitializing TLSConfig when ssl certificate
@@ -359,11 +361,11 @@ type Svc struct {
 	db                  *credsDB
 	staleErr            error
 	freshChan           chan struct{}
-	upCache             *LRUCache
+	upCache             *utils.LRUCache
 	upCacheOnce         sync.Once
-	authCache           *LRUCache
+	authCache           *utils.LRUCache
 	authCacheOnce       sync.Once
-	clientCertCache     *LRUCache
+	clientCertCache     *utils.LRUCache
 	clientCertCacheOnce sync.Once
 	httpClient          *http.Client
 	semaphore           semaphore
@@ -635,7 +637,7 @@ func checkPermission(s *Svc, user, domain, permission string) (bool, error) {
 		return false, staleError(s)
 	}
 
-	s.upCacheOnce.Do(func() { s.upCache = NewLRUCache(1024) })
+	s.upCacheOnce.Do(func() { s.upCache = utils.NewLRUCache(1024) })
 
 	if domain == "external" {
 		return checkPermissionOnServer(s, db, user, domain, permission)
@@ -716,7 +718,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 			domain:   "admin"}, nil
 	}
 
-	s.authCacheOnce.Do(func() { s.authCache = NewLRUCache(256) })
+	s.authCacheOnce.Do(func() { s.authCache = utils.NewLRUCache(256) })
 
 	key := userPassword{db.authVersion, user, password}
 
@@ -842,7 +844,9 @@ func MaybeGetCredsFromCert(s *Svc, req *http.Request) (*CredsImpl, error) {
 		return nil, nil
 	}
 
-	s.clientCertCacheOnce.Do(func() { s.clientCertCache = NewLRUCache(256) })
+	s.clientCertCacheOnce.Do(func() {
+		s.clientCertCache = utils.NewLRUCache(256)
+	})
 	cAuthType := db.tlsConfig.ClientAuthType
 
 	if cAuthType == tls.NoClientCert {
