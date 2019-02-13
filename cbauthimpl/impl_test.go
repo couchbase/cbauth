@@ -18,6 +18,7 @@ package cbauthimpl
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -40,10 +41,14 @@ func updateDB(svc *Svc) {
 }
 
 func runReaders(svc *Svc, b *testing.B) {
-	for _, readers := range readerConfigs {
+	for _, desiredReaders := range readerConfigs {
+		maxprocs := runtime.GOMAXPROCS(0)
+		parallelism := 1 + (desiredReaders-1)/maxprocs
+		readers := parallelism * maxprocs
+
 		name := fmt.Sprintf("readers = %d", readers)
 		b.Run(name, func(b *testing.B) {
-			b.SetParallelism(readers)
+			b.SetParallelism(parallelism)
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					_ = fetchDB(svc)
