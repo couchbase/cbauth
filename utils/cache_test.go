@@ -181,3 +181,29 @@ func adjustThreads(wanted int) (int, int) {
 
 	return parallelism * maxprocs, parallelism
 }
+
+func TestCacheSize(t *testing.T) {
+	c := NewCache(cacheSize)
+
+	for i := 0; i < cacheSize*4; i++ {
+		ok := c.Add(i, i+13)
+		if !ok {
+			t.Fatalf("key %d is already in the cache", i)
+		}
+	}
+
+	found := 0
+	for i := 0; i < cacheSize*4; i++ {
+		v, ok := c.Get(i)
+		if ok {
+			found++
+			if v != i+13 {
+				t.Fatalf("bad value %d for key %d", v, i)
+			}
+		}
+	}
+
+	if found != cacheSize {
+		t.Fatalf("bad cache size %d, expected %d", found, cacheSize)
+	}
+}
