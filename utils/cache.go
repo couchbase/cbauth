@@ -26,8 +26,8 @@ type item struct {
 	lruElem *list.Element
 }
 
-// LRUCache implements simple LRU Cache
-type LRUCache struct {
+// Cache implements simple LRU Cache
+type Cache struct {
 	sync.Mutex
 	lru   *list.List
 	items map[interface{}]*item
@@ -35,9 +35,9 @@ type LRUCache struct {
 	maxSize int
 }
 
-// NewLRUCache creates new LRUCache
-func NewLRUCache(size int) *LRUCache {
-	return &LRUCache{
+// NewCache creates new Cache
+func NewCache(size int) *Cache {
+	return &Cache{
 		lru:     list.New(),
 		items:   make(map[interface{}]*item),
 		maxSize: size,
@@ -45,7 +45,7 @@ func NewLRUCache(size int) *LRUCache {
 }
 
 // Get gets the value by key, returns (nil, false) if the value is not found
-func (c *LRUCache) Get(key interface{}) (interface{}, bool) {
+func (c *Cache) Get(key interface{}) (interface{}, bool) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -59,7 +59,7 @@ func (c *LRUCache) Get(key interface{}) (interface{}, bool) {
 }
 
 // Set sets the value for the key in LRU Cache
-func (c *LRUCache) Set(key interface{}, value interface{}) {
+func (c *Cache) Set(key interface{}, value interface{}) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -73,7 +73,7 @@ func (c *LRUCache) Set(key interface{}, value interface{}) {
 	c.touch(itm)
 }
 
-func (c *LRUCache) maybeEvict() {
+func (c *Cache) maybeEvict() {
 	if len(c.items) < c.maxSize {
 		return
 	}
@@ -82,7 +82,7 @@ func (c *LRUCache) maybeEvict() {
 	delete(c.items, victim.key)
 }
 
-func (c *LRUCache) create(key interface{}, value interface{}) {
+func (c *Cache) create(key interface{}, value interface{}) {
 	c.maybeEvict()
 
 	itm := &item{
@@ -95,6 +95,6 @@ func (c *LRUCache) create(key interface{}, value interface{}) {
 	c.items[key] = itm
 }
 
-func (c *LRUCache) touch(itm *item) {
+func (c *Cache) touch(itm *item) {
 	c.lru.MoveToBack(itm.lruElem)
 }

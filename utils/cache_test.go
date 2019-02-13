@@ -30,7 +30,7 @@ func TestOneItem(t *testing.T) {
 	threads := 10000
 	hits := 10000
 
-	c := NewLRUCache(size)
+	c := NewCache(size)
 
 	c.Set("aa", "bb")
 
@@ -58,7 +58,7 @@ func TestChaos(t *testing.T) {
 	threads := 10000
 	hits := 10000
 
-	c := NewLRUCache(size)
+	c := NewCache(size)
 
 	misses := make([]int, threads)
 

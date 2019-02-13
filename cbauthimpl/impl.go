@@ -361,11 +361,11 @@ type Svc struct {
 	db                  *credsDB
 	staleErr            error
 	freshChan           chan struct{}
-	upCache             *utils.LRUCache
+	upCache             *utils.Cache
 	upCacheOnce         sync.Once
-	authCache           *utils.LRUCache
+	authCache           *utils.Cache
 	authCacheOnce       sync.Once
-	clientCertCache     *utils.LRUCache
+	clientCertCache     *utils.Cache
 	clientCertCacheOnce sync.Once
 	httpClient          *http.Client
 	semaphore           semaphore
@@ -637,7 +637,7 @@ func checkPermission(s *Svc, user, domain, permission string) (bool, error) {
 		return false, staleError(s)
 	}
 
-	s.upCacheOnce.Do(func() { s.upCache = utils.NewLRUCache(1024) })
+	s.upCacheOnce.Do(func() { s.upCache = utils.NewCache(1024) })
 
 	if domain == "external" {
 		return checkPermissionOnServer(s, db, user, domain, permission)
@@ -718,7 +718,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 			domain:   "admin"}, nil
 	}
 
-	s.authCacheOnce.Do(func() { s.authCache = utils.NewLRUCache(256) })
+	s.authCacheOnce.Do(func() { s.authCache = utils.NewCache(256) })
 
 	key := userPassword{db.authVersion, user, password}
 
@@ -845,7 +845,7 @@ func MaybeGetCredsFromCert(s *Svc, req *http.Request) (*CredsImpl, error) {
 	}
 
 	s.clientCertCacheOnce.Do(func() {
-		s.clientCertCache = utils.NewLRUCache(256)
+		s.clientCertCache = utils.NewCache(256)
 	})
 	cAuthType := db.tlsConfig.ClientAuthType
 
