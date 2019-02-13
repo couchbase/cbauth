@@ -137,6 +137,44 @@ func BenchmarkCacheAddGet(b *testing.B) {
 	}
 }
 
+func BenchmarkCacheAdd(b *testing.B) {
+	for _, threads := range threadConfigs {
+		threads, parallelism := adjustThreads(threads)
+		name := fmt.Sprintf("threads = %d", threads)
+
+		b.Run(name, func(b *testing.B) {
+			id := uint32(0)
+			totalAdds := uint64(0)
+
+			c := NewCache(cacheSize)
+			for i := uint64(0); i < cacheSize; i++ {
+				c.Add(i, i)
+			}
+
+			b.ResetTimer()
+
+			b.SetParallelism(parallelism)
+			b.RunParallel(func(pb *testing.PB) {
+				myID := atomic.AddUint32(&id, 1)
+				key := uint64(myID) << 32
+				adds := uint64(0)
+
+				for pb.Next() {
+					added := c.Add(key, key)
+					if !added {
+						b.Fatalf("%d already exists",
+							key)
+					}
+
+					key++
+				}
+
+				atomic.AddUint64(&totalAdds, adds)
+			})
+		})
+	}
+}
+
 func adjustThreads(wanted int) (int, int) {
 	maxprocs := runtime.GOMAXPROCS(0)
 	parallelism := 1 + (wanted-1)/maxprocs
