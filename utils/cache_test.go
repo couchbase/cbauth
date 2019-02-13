@@ -32,7 +32,7 @@ func TestOneItem(t *testing.T) {
 
 	c := NewCache(size)
 
-	c.Set("aa", "bb")
+	c.Add("aa", "bb")
 
 	wg.Add(threads)
 
@@ -65,7 +65,7 @@ func TestChaos(t *testing.T) {
 	wg.Add(threads)
 
 	for i := 0; i < values; i++ {
-		c.Set(i, i+13)
+		c.Add(i, i+13)
 	}
 
 	for i := 0; i < threads; i++ {
@@ -82,7 +82,7 @@ func TestChaos(t *testing.T) {
 				res, success := c.Get(key)
 				if !success {
 					misses[num] = misses[num] + 1
-					c.Set(key, value)
+					c.Add(key, value)
 				} else if res != value {
 					t.Fatalf("value mismatch %d != %d",
 						res, value)

@@ -58,19 +58,19 @@ func (c *Cache) Get(key interface{}) (interface{}, bool) {
 	return itm.value, true
 }
 
-// Set sets the value for the key in LRU Cache
-func (c *Cache) Set(key interface{}, value interface{}) {
+// Add adds a key/value mapping to the cache if it doesn't already
+// exist. Returns true if the mapping was added and false otherwise.
+func (c *Cache) Add(key interface{}, value interface{}) bool {
 	c.Lock()
 	defer c.Unlock()
 
-	itm, ok := c.items[key]
+	_, ok := c.items[key]
 	if !ok {
 		c.create(key, value)
-		return
+		return true
 	}
 
-	itm.value = value
-	c.touch(itm)
+	return false
 }
 
 func (c *Cache) maybeEvict() {

@@ -654,7 +654,7 @@ func checkPermission(s *Svc, user, domain, permission string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	s.upCache.Set(key, allowedOnServer)
+	s.upCache.Add(key, allowedOnServer)
 	return allowedOnServer, nil
 }
 
@@ -738,7 +738,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	}
 
 	if rv.domain == "admin" || rv.domain == "local" {
-		s.authCache.Set(key, userIdentity{rv.name, rv.domain})
+		s.authCache.Add(key, userIdentity{rv.name, rv.domain})
 	}
 	return rv, nil
 }
@@ -875,7 +875,7 @@ func MaybeGetCredsFromCert(s *Svc, req *http.Request) (*CredsImpl, error) {
 		creds, _ := getUserIdentityFromCert(cert, db, s)
 		if creds != nil {
 			ui := &userIdentity{user: creds.name, domain: creds.domain}
-			s.clientCertCache.Set(key, interface{}(ui))
+			s.clientCertCache.Add(key, interface{}(ui))
 			return creds, nil
 		}
 
