@@ -68,6 +68,7 @@ type TLSConfig struct {
 	CipherSuiteOpenSSLNames  []string
 	PreferServerCipherSuites bool
 	ClientAuthType           tls.ClientAuthType
+	present                  bool
 }
 
 // ClusterEncryptionConfig contains info about whether to use SSL ports for
@@ -83,6 +84,7 @@ type tlsConfigImport struct {
 	CipherNames        []string
 	CipherOpenSSLNames []string
 	CipherOrder        bool
+	Present            bool
 }
 
 // ErrNoAuth is an error that is returned when the user credentials
@@ -817,6 +819,7 @@ func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig
 		CipherSuiteOpenSSLNames:  append([]string{}, cfg.CipherOpenSSLNames...),
 		PreferServerCipherSuites: cfg.CipherOrder,
 		ClientAuthType:           getAuthType(ClientCertAuthState),
+		present:                  cfg.Present,
 	}
 }
 
@@ -826,6 +829,9 @@ func GetTLSConfig(s *Svc) (TLSConfig, error) {
 	db := fetchDB(s)
 	if db == nil {
 		return TLSConfig{}, staleError(s)
+	}
+	if !db.tlsConfig.present {
+		return TLSConfig{}, fmt.Errorf("TLSConfig is not present for this service")
 	}
 	return db.tlsConfig, nil
 }
