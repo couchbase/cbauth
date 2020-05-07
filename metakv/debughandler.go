@@ -66,6 +66,18 @@ func serveDebugReq(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/_changesV2/") {
+		path := r.URL.Path[len("/_changesV2/")-1:]
+		err := RunObserveChildrenV2(path, func(e KVEntry) error {
+			emitKVEntry(w, e)
+			w.(http.Flusher).Flush()
+			return nil
+		}, make(chan struct{}))
+		if err != nil {
+			panic(err)
+		}
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/_put/") && r.Method == "POST" {
 		b, err := ioutil.ReadAll(r.Body)
 		if err != nil {
