@@ -18,6 +18,7 @@ import (
 type entry struct {
 	v []byte
 	r []byte
+	s bool
 }
 
 type mockKV struct {
@@ -50,15 +51,16 @@ func (kv *mockKV) broadcast(kve KVEntry) {
 	}
 }
 
-func (kv *mockKV) setLocked(path string, value string) {
+func (kv *mockKV) setLocked(path string, value string, sensitive bool) {
 	rev := make([]byte, 8)
 	binary.LittleEndian.PutUint64(rev, kv.counter)
 	kv.counter++
 	v := []byte(value)
-	e := entry{v, rev}
+	e := entry{v, rev, sensitive}
 	kv.data[path] = e
 
-	kv.broadcast(KVEntry{Path: path, Value: v, Rev: rev})
+	kv.broadcast(KVEntry{Path: path, Value: v, Rev: rev,
+		Sensitive: sensitive})
 }
 
 func (kv *mockKV) subscribeLocked(ch chan KVEntry) func() {
@@ -122,6 +124,7 @@ func (kv *mockKV) Handle(w http.ResponseWriter, req *http.Request) {
 		create := form.Get("create") != ""
 		value := form.Get("value")
 		rev := form.Get("rev")
+		sensitive := form.Get("sensitive") == "true"
 
 		if !kv.checkRevision(rev, path) {
 			w.WriteHeader(409)
@@ -134,7 +137,7 @@ func (kv *mockKV) Handle(w http.ResponseWriter, req *http.Request) {
 				return
 			}
 		}
-		kv.setLocked(path, value)
+		kv.setLocked(path, value, sensitive)
 	case "DELETE":
 		rev := req.URL.Query().Get("rev")
 
@@ -143,7 +146,7 @@ func (kv *mockKV) Handle(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		kv.broadcast(KVEntry{path, nil, nil})
+		kv.broadcast(KVEntry{path, nil, nil, false})
 		delete(kv.data, path)
 	default:
 		w.WriteHeader(404)
@@ -162,7 +165,8 @@ func (kv *mockKV) handleIterate(w http.ResponseWriter, req *http.Request) {
 	continuous := req.URL.Query().Get("feed") == "continuous"
 	entries := make([]KVEntry, 0, len(kv.data))
 	for k, e := range kv.data {
-		entries = append(entries, KVEntry{Path: k, Value: e.v, Rev: e.r})
+		entries = append(entries, KVEntry{Path: k, Value: e.v, Rev: e.r,
+			Sensitive: e.s})
 	}
 	sort.Sort(entriesSlice(entries))
 	enc := json.NewEncoder(w)
