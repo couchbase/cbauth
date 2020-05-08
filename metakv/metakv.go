@@ -43,9 +43,22 @@ var ErrRevMismatch = errors.New("Rev mismatch")
 
 var errNotFound = errors.New("Not found")
 
+// KVEntry struct represents kv entry returned from ListAllChildren and
+// used as a parameter in CallbackV2
+type KVEntry struct {
+	Path      string
+	Value     []byte
+	Rev       interface{}
+	Sensitive bool
+}
+
 // Callback type describes functions that receive mutations from
 // RunObserveChildren.
 type Callback func(path string, value []byte, rev interface{}) error
+
+// CallbackV2 type describes functions that receive mutations from
+// RunObserveChildrenV2.
+type CallbackV2 func(entry KVEntry) error
 
 // RevCreate is a special revision which when passed to Set will change
 // Set to Add.
@@ -126,10 +139,13 @@ func doJSONCall(s *store, method, path string, values url.Values, place interfac
 }
 
 type kvEntry struct {
-	Path  string
-	Value []byte
-	Rev   []byte
+	Path      string
+	Value     []byte
+	Rev       []byte
+	Sensitive bool
 }
+
+type callbackInt func(entry kvEntry) error
 
 func assertValidPathPrefix(path string) {
 	if path[0] != '/' {
@@ -228,7 +244,7 @@ func (s *store) recursiveDelete(dirpath string) error {
 
 // IterateChildren invokes given callback on every kv-pair that's
 // child of given directory path. Path must end on "/".
-func (s *store) iterateChildren(dirpath string, callback Callback) error {
+func (s *store) iterateChildren(dirpath string, callback callbackInt) error {
 	return doRunObserveChildren(s, dirpath, callback, nil)
 }
 
@@ -239,14 +255,16 @@ func (s *store) iterateChildren(dirpath string, callback Callback) error {
 // when children callback returns error. If exit is due to cancel
 // channel being closed returned error is nil. Otherwise error is
 // non-nil. Path must end on "/".
-func (s *store) runObserveChildren(dirpath string, callback Callback, cancel <-chan struct{}) error {
+func (s *store) runObserveChildren(dirpath string, callback callbackInt,
+	cancel <-chan struct{}) error {
 	if cancel == nil {
 		return nil
 	}
 	return doRunObserveChildren(s, dirpath, callback, cancel)
 }
 
-func doRunObserveChildren(s *store, dirpath string, callback Callback, cancel <-chan struct{}) error {
+func doRunObserveChildren(s *store, dirpath string, callback callbackInt,
+	cancel <-chan struct{}) error {
 	assertValidDirPath(dirpath)
 	values := url.Values{}
 	if cancel != nil {
@@ -290,7 +308,7 @@ readLoop:
 				err = <-errChan
 				break readLoop
 			}
-			err = callback(kve.Path, kve.Value, kve.Rev)
+			err = callback(kve)
 			if err != nil {
 				return err
 			}
@@ -356,7 +374,10 @@ func RecursiveDelete(dirpath string) error {
 // IterateChildren invokes given callback on every kv-pair that's
 // child of given directory path. Path must end on "/".
 func IterateChildren(dirpath string, callback Callback) error {
-	return defaultStore.iterateChildren(dirpath, callback)
+	return defaultStore.iterateChildren(dirpath,
+		func(e kvEntry) error {
+			return callback(e.Path, e.Value, e.Rev)
+		})
 }
 
 // RunObserveChildren invokes gen callback on every kv-pair that is
@@ -366,15 +387,38 @@ func IterateChildren(dirpath string, callback Callback) error {
 // when children callback returns error. If exit is due to cancel
 // channel being closed returned error is nil. Otherwise error is
 // non-nil. Path must end on "/".
-func RunObserveChildren(dirpath string, callback Callback, cancel <-chan struct{}) error {
-	return defaultStore.runObserveChildren(dirpath, callback, cancel)
+func RunObserveChildren(dirpath string, callback Callback,
+	cancel <-chan struct{}) error {
+	return defaultStore.runObserveChildren(dirpath,
+		func(e kvEntry) error {
+			return callback(e.Path, e.Value, e.Rev)
+		}, cancel)
 }
 
-// KVEntry struct represents kv entry returned from ListAllChildren
-type KVEntry struct {
-	Path  string
-	Value []byte
-	Rev   interface{}
+// IterateChildrenV2 invokes given callback on every kv-pair that's
+// child of given directory path. Path must end on "/".
+func IterateChildrenV2(dirpath string, callback CallbackV2) error {
+	return defaultStore.iterateChildren(dirpath,
+		func(e kvEntry) error {
+			return callback(KVEntry{e.Path, e.Value, e.Rev,
+				e.Sensitive})
+		})
+}
+
+// RunObserveChildrenV2 invokes gen callback on every kv-pair that is
+// child of given directory path and then on every mutation of
+// affected keys. Deletions will be signalled by passing nil to value
+// argument of callback. Returns only when cancel channel is closed or
+// when children callback returns error. If exit is due to cancel
+// channel being closed returned error is nil. Otherwise error is
+// non-nil. Path must end on "/".
+func RunObserveChildrenV2(dirpath string, callback CallbackV2,
+	cancel <-chan struct{}) error {
+	return defaultStore.runObserveChildren(dirpath,
+		func(e kvEntry) error {
+			return callback(KVEntry{e.Path, e.Value, e.Rev,
+				e.Sensitive})
+		}, cancel)
 }
 
 // ListAllChildren returns all child entries of given "directory" node.
@@ -388,9 +432,11 @@ func (s *store) listAllChildren(dirpath string) (entries []KVEntry, err error) {
 	// in my testing code it means json null is returned rather
 	// than empty json array.
 	entries = make([]KVEntry, 0, 16)
-	err = s.iterateChildren(dirpath, func(path string, value []byte, rev interface{}) error {
-		entries = append(entries, KVEntry{path, value, rev})
-		return nil
-	})
+	err = s.iterateChildren(dirpath,
+		func(e kvEntry) error {
+			entries = append(entries,
+				KVEntry{e.Path, e.Value, e.Rev, e.Sensitive})
+			return nil
+		})
 	return
 }

@@ -10,7 +10,7 @@ func noPanic(err error) {
 	}
 }
 
-func doAppend(s *store, path string, value []byte) error {
+func doAppend(s *store, path string, value string, sensitive bool) error {
 	oldv, rev, err := s.get(path)
 	if err != nil {
 		return err
@@ -18,15 +18,39 @@ func doAppend(s *store, path string, value []byte) error {
 	if rev == nil {
 		rev = RevCreate
 	}
-	oldv = append(oldv, value...)
-	return s.set(path, oldv, rev, false)
+	oldv = append(oldv, []byte(value)...)
+	return s.set(path, oldv, rev, sensitive)
 }
 
-func kvEqual(a, b KVEntry) bool {
-	if a.Value == nil && b.Value != nil || b.Value == nil && a.Value != nil {
+func kvEqual(e kvEntry, key string, val []byte, sensitive bool) bool {
+	if e.Value == nil && val != nil || e.Value != nil && val == nil {
 		return false
 	}
-	return a.Path == b.Path && string(a.Value) == string(b.Value)
+	// deletions signal rev that is interface{}([]byte(nil))
+	if val == nil && len(e.Rev) != 0 {
+		return false
+	}
+	return e.Path == key && string(e.Value) == string(val) &&
+		e.Sensitive == sensitive
+}
+
+func assertKV(log func(v ...interface{}), e kvEntry, key string, val []byte,
+	sensitive bool) {
+	if !kvEqual(e, key, val, sensitive) {
+		log(fmt.Sprintf("bad mutation: %v", e))
+		panic("bad mutation")
+	}
+}
+
+func assertAndDelete(s *store, key string, val string) {
+	v, r, err := s.get(key)
+	noPanic(err)
+	if r == nil || string(v) != val {
+		panic(fmt.Sprintf("wrong value: %v", string(v)))
+	}
+
+	err = s.delete(key, r)
+	noPanic(err)
 }
 
 // ExecuteBasicSanityTest runs basic sanity test.
@@ -50,7 +74,7 @@ func doExecuteBasicSanityTest(log func(v ...interface{}), s *store) {
 		panic("badness")
 	}
 
-	buf := make(chan KVEntry, 128)
+	buf := make(chan kvEntry, 128)
 	cancelChan := make(chan struct{})
 
 	defer func() {
@@ -60,8 +84,8 @@ func doExecuteBasicSanityTest(log func(v ...interface{}), s *store) {
 	}()
 
 	go func() {
-		err := s.runObserveChildren("/_sanity/", func(path string, value []byte, rev interface{}) error {
-			buf <- KVEntry{Path: path, Value: value, Rev: rev}
+		err := s.runObserveChildren("/_sanity/", func(e kvEntry) error {
+			buf <- e
 			return nil
 		}, cancelChan)
 		log("Sanity observe loop exited")
@@ -71,7 +95,7 @@ func doExecuteBasicSanityTest(log func(v ...interface{}), s *store) {
 		}
 	}()
 
-	err = doAppend(s, "/_sanity/key", []byte("value"))
+	err = doAppend(s, "/_sanity/key", "value", false)
 	noPanic(err)
 
 	v, r, err = s.get("/_sanity/key")
@@ -83,19 +107,16 @@ func doExecuteBasicSanityTest(log func(v ...interface{}), s *store) {
 	err = s.set("/_sanity/key", []byte("new value"), r, false)
 	noPanic(err)
 
+	err = doAppend(s, "/_sanity/secret", "secret", true)
+	noPanic(err)
+
 	err = s.delete("/_sanity/key", r)
 	if err != ErrRevMismatch {
 		panic("must have ErrRevMismatch")
 	}
 
-	v, r, err = s.get("/_sanity/key")
-	noPanic(err)
-	if r == nil || string(v) != "new value" {
-		panic("bad")
-	}
-
-	err = s.delete("/_sanity/key", r)
-	noPanic(err)
+	assertAndDelete(s, "/_sanity/secret", "secret")
+	assertAndDelete(s, "/_sanity/key", "new value")
 
 	l, err = s.listAllChildren("/_sanity/")
 	noPanic(err)
@@ -106,28 +127,23 @@ func doExecuteBasicSanityTest(log func(v ...interface{}), s *store) {
 	close(cancelChan)
 	cancelChan = nil
 
-	var allMutations []KVEntry
+	var allMutations []kvEntry
 	for kve := range buf {
 		allMutations = append(allMutations, kve)
 	}
 
-	if len(allMutations) != 3 {
-		panic(fmt.Sprintf("bad mutations size: %d (%v)", len(allMutations), allMutations))
+	if len(allMutations) != 5 {
+		panic(fmt.Sprintf("bad mutations size: %d (%v)",
+			len(allMutations), allMutations))
 	}
 
-	if !kvEqual(allMutations[0], KVEntry{Path: "/_sanity/key", Value: []byte("value")}) {
-		panic("bad mutation")
-	}
-
-	if !kvEqual(allMutations[1], KVEntry{Path: "/_sanity/key", Value: []byte("new value")}) {
-		panic("bad mutation")
-	}
-
-	// deletions signal rev that is interface{}([]byte(nil))
-	if !kvEqual(allMutations[2], KVEntry{Path: "/_sanity/key", Value: nil}) || len(allMutations[2].Rev.([]byte)) != 0 {
-		log(fmt.Sprintf("bad mutation: %v", allMutations[2]))
-		panic("bad mutation")
-	}
+	assertKV(log, allMutations[0], "/_sanity/key", []byte("value"), false)
+	assertKV(log, allMutations[1], "/_sanity/key", []byte("new value"),
+		false)
+	assertKV(log, allMutations[2], "/_sanity/secret", []byte("secret"),
+		true)
+	assertKV(log, allMutations[3], "/_sanity/secret", nil, false)
+	assertKV(log, allMutations[4], "/_sanity/key", nil, false)
 
 	err = s.set("/_sanity/key", []byte("more value"), nil, false)
 	noPanic(err)

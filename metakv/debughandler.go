@@ -19,6 +19,20 @@ func performAppend(path string, value []byte) error {
 	return Set(path, oldv, rev)
 }
 
+func emitKVEntry(w http.ResponseWriter, e KVEntry) {
+	b, err := json.Marshal(map[string]interface{}{
+		"path":      e.Path,
+		"value":     string(e.Value),
+		"rev":       e.Rev,
+		"sensitive": e.Sensitive,
+	})
+	if err != nil {
+		panic(err)
+	}
+	w.Write(b)
+	w.Write([]byte("\n\n"))
+}
+
 func serveDebugReq(w http.ResponseWriter, r *http.Request) {
 
 	if r.URL.Path == "/_list" {
@@ -26,11 +40,9 @@ func serveDebugReq(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			panic(err)
 		}
-		b, err := json.Marshal(l)
-		if err != nil {
-			panic(err)
+		for _, e := range l {
+			emitKVEntry(w, e)
 		}
-		w.Write(b)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/_changes/") {
@@ -46,6 +58,18 @@ func serveDebugReq(w http.ResponseWriter, r *http.Request) {
 			}
 			w.Write(b)
 			w.Write([]byte("\n\n"))
+			w.(http.Flusher).Flush()
+			return nil
+		}, make(chan struct{}))
+		if err != nil {
+			panic(err)
+		}
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/_changesV2/") {
+		path := r.URL.Path[len("/_changesV2/")-1:]
+		err := RunObserveChildrenV2(path, func(e KVEntry) error {
+			emitKVEntry(w, e)
 			w.(http.Flusher).Flush()
 			return nil
 		}, make(chan struct{}))
