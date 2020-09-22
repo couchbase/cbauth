@@ -576,6 +576,24 @@ func verifyPasswordOnServer(s *Svc, user, password string) (*CredsImpl, error) {
 	return VerifyOnServer(s, req.Header)
 }
 
+// VerifyOnBehalf authenticates http request with on behalf header
+func VerifyOnBehalf(s *Svc, user, password, onBehalfUser,
+	onBehalfDomain string) (*CredsImpl, error) {
+
+	db := fetchDB(s)
+	if db == nil {
+		return nil, staleError(s)
+	}
+
+	if verifySpecialCreds(db, user, password) {
+		return &CredsImpl{
+			name:   onBehalfUser,
+			s:      s,
+			domain: onBehalfDomain}, nil
+	}
+	return nil, ErrNoAuth
+}
+
 // VerifyOnServer authenticates http request by calling POST /_cbauth REST endpoint
 func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 	db := fetchDB(s)
