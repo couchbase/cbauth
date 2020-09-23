@@ -152,7 +152,16 @@ func (a *authImpl) AuthWebCreds(req *http.Request) (creds Creds, err error) {
 	if user == "" && pwd == "" {
 		return nil, fmt.Errorf("no web credentials found in request")
 	}
-	return cbauthimpl.VerifyPassword(a.svc, user, pwd)
+	onBehalfUser, onBehalfDomain, err := ExtractOnBehalfIdentity(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if onBehalfUser == "" && onBehalfDomain == "" {
+		return cbauthimpl.VerifyPassword(a.svc, user, pwd)
+	}
+	return cbauthimpl.VerifyOnBehalf(a.svc, user, pwd,
+		onBehalfUser, onBehalfDomain)
 }
 
 func (a *authImpl) Auth(user, pwd string) (creds Creds, err error) {
