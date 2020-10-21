@@ -862,6 +862,8 @@ func minTLSVersion(str string) uint16 {
 		return tls.VersionTLS11
 	case "tlsv1.2":
 		return tls.VersionTLS12
+	case "tlsv1.3":
+		return tls.VersionTLS13
 	default:
 		return tls.VersionTLS10
 	}
