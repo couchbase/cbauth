@@ -862,6 +862,12 @@ func minTLSVersion(str string) uint16 {
 		return tls.VersionTLS11
 	case "tlsv1.2":
 		return tls.VersionTLS12
+	case "tlsv1.3":
+		// return tls.VersionTLS13
+		// Ideally we want the code above but then cbauth gets compiled with
+		// multiple versions of GO so we cannot rely on the const
+		// VersionTLS13 to be present.
+		return 0x0304
 	default:
 		return tls.VersionTLS10
 	}
