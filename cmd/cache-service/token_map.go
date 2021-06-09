@@ -164,16 +164,16 @@ func NewTokenMapStream() *TokenMapStream {
 	cancel := make(chan struct{})
 	ch := make(chan *TokenMap)
 
-	cb := func(path string, value []byte, rev interface{}) error {
-		if path != TokensKey {
+	cb := func(kve metakv.KVEntry) error {
+		if kve.Path != TokensKey {
 			return nil
 		}
 
 		tokens := &TokenMap{}
-		err := json.Unmarshal(value, tokens)
+		err := json.Unmarshal(kve.Value, tokens)
 		if err != nil {
 			log.Fatalf("Failed to unmarshal token map: %s\n%s",
-				err.Error(), string(value))
+				err.Error(), string(kve.Value))
 		}
 
 		select {
@@ -184,7 +184,7 @@ func NewTokenMapStream() *TokenMapStream {
 		return nil
 	}
 
-	go metakv.RunObserveChildren(ServiceDir, cb, cancel)
+	go metakv.RunObserveChildrenV2(ServiceDir, cb, cancel)
 
 	return &TokenMapStream{
 		C:      ch,
