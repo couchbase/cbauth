@@ -54,7 +54,7 @@ type KVEntry struct {
 
 // Callback type describes functions that receive mutations from
 // RunObserveChildren.
-type Callback func(path string, value []byte, rev interface{}) error
+type Callback func(entry KVEntry) error
 
 // CallbackV2 type describes functions that receive mutations from
 // RunObserveChildrenV2.
@@ -376,7 +376,8 @@ func RecursiveDelete(dirpath string) error {
 func IterateChildren(dirpath string, callback Callback) error {
 	return defaultStore.iterateChildren(dirpath,
 		func(e kvEntry) error {
-			return callback(e.Path, e.Value, e.Rev)
+			return callback(KVEntry{e.Path, e.Value, e.Rev,
+				e.Sensitive})
 		})
 }
 
@@ -391,11 +392,12 @@ func RunObserveChildren(dirpath string, callback Callback,
 	cancel <-chan struct{}) error {
 	return defaultStore.runObserveChildren(dirpath,
 		func(e kvEntry) error {
-			return callback(e.Path, e.Value, e.Rev)
+			return callback(KVEntry{e.Path, e.Value, e.Rev,
+				e.Sensitive})
 		}, cancel)
 }
 
-// IterateChildrenV2 invokes given callback on every kv-pair that's
+// IterateChildren invokes given callback on every kv-pair that's
 // child of given directory path. Path must end on "/".
 func IterateChildrenV2(dirpath string, callback CallbackV2) error {
 	return defaultStore.iterateChildren(dirpath,

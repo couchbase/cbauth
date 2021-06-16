@@ -184,7 +184,7 @@ func NewTokenMapStream() *TokenMapStream {
 		return nil
 	}
 
-	go metakv.RunObserveChildrenV2(ServiceDir, cb, cancel)
+	go metakv.RunObserveChildren(ServiceDir, cb, cancel)
 
 	return &TokenMapStream{
 		C:      ch,
