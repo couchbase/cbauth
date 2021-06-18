@@ -47,11 +47,11 @@ func serveDebugReq(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/_changes/") {
 		path := r.URL.Path[len("/_changes/")-1:]
-		err := RunObserveChildren(path, func(kve KVEntry) error {
+		err := RunObserveChildren(path, func(path string, value []byte, rev interface{}) error {
 			b, err := json.Marshal(map[string]interface{}{
 				"path":  path,
-				"value": string(kve.Value),
-				"rev":   kve.Rev,
+				"value": string(value),
+				"rev":   rev,
 			})
 			if err != nil {
 				panic(err)
