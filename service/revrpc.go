@@ -145,3 +145,14 @@ func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 
 	return revrpc.BabysitService(setup, service, errorPolicy)
 }
+
+func RegisterManagerWithURL(mgr Manager, rurl string, errorPolicy revrpc.BabysitErrorPolicy) error {
+
+	service := revrpc.MustService(rurl)
+
+	setup := func(rpc *rpc.Server) error {
+		return rpc.RegisterName("ServiceAPI", &serviceAPI{mgr})
+	}
+
+	return revrpc.BabysitService(setup, service, errorPolicy)
+}
