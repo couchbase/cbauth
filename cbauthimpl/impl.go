@@ -45,6 +45,7 @@ type TLSRefreshCallback func() error
 const (
 	CFG_CHANGE_CERTS_TLSCONFIG uint64 = 1 << iota
 	CFG_CHANGE_CLUSTER_ENCRYPTION
+	CFG_CHANGE_USER_LIMITS
 	_MAX_CFG_CHANGE_FLAGS
 )
 
@@ -69,6 +70,13 @@ type TLSConfig struct {
 	PreferServerCipherSuites bool
 	ClientAuthType           tls.ClientAuthType
 	present                  bool
+}
+
+// LimitsConfig contains info about whether Limits needs to be enforced and what
+// the limits version is.
+type LimitsConfig struct {
+	EnforceLimits     bool
+	UserLimitsVersion string
 }
 
 // ClusterEncryptionConfig contains info about whether to use SSL ports for
@@ -141,6 +149,7 @@ type credsDB struct {
 	nodes                   []Node
 	authCheckURL            string
 	permissionCheckURL      string
+	limitsCheckURL          string
 	specialUser             string
 	specialPassword         string
 	permissionsVersion      string
@@ -148,6 +157,7 @@ type credsDB struct {
 	certVersion             int
 	extractUserFromCertURL  string
 	clientCertAuthVersion   string
+	limitsConfig            LimitsConfig
 	clusterEncryptionConfig ClusterEncryptionConfig
 	tlsConfig               TLSConfig
 }
@@ -157,8 +167,10 @@ type Cache struct {
 	Nodes                   []Node
 	AuthCheckURL            string `json:"authCheckUrl"`
 	PermissionCheckURL      string `json:"permissionCheckUrl"`
+	LimitsCheckURL          string
 	SpecialUser             string `json:"specialUser"`
 	PermissionsVersion      string
+	LimitsConfig            LimitsConfig
 	AuthVersion             string
 	CertVersion             int
 	ExtractUserFromCertURL  string                  `json:"extractUserFromCertURL"`
@@ -374,6 +386,8 @@ type Svc struct {
 	db                  *credsDB
 	staleErr            error
 	freshChan           chan struct{}
+	ulCache             *utils.Cache
+	ulCacheOnce         sync.Once
 	upCache             *utils.Cache
 	upCacheOnce         sync.Once
 	authCache           *utils.Cache
@@ -391,8 +405,10 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		nodes:                   c.Nodes,
 		authCheckURL:            c.AuthCheckURL,
 		permissionCheckURL:      c.PermissionCheckURL,
+		limitsCheckURL:          c.LimitsCheckURL,
 		specialUser:             c.SpecialUser,
 		permissionsVersion:      c.PermissionsVersion,
+		limitsConfig:            c.LimitsConfig,
 		authVersion:             c.AuthVersion,
 		certVersion:             c.CertVersion,
 		extractUserFromCertURL:  c.ExtractUserFromCertURL,
@@ -527,6 +543,10 @@ func (s *Svc) needConfigRefresh(db *credsDB) uint64 {
 		changes |= CFG_CHANGE_CLUSTER_ENCRYPTION
 	}
 
+	if s.db.limitsConfig != db.limitsConfig {
+		changes |= CFG_CHANGE_USER_LIMITS
+	}
+
 	return changes
 }
 
@@ -658,6 +678,81 @@ func executeReqAndGetCreds(s *Svc, req *http.Request) (*CredsImpl, error) {
 
 	rv := CredsImpl{name: resp.User, domain: resp.Domain, s: s}
 	return &rv, nil
+}
+
+type serviceLimits struct {
+	version string
+	user    string
+	domain  string
+	service string
+}
+
+func GetUserLimits(s *Svc, user, domain, service string) (map[string]int, error) {
+	var limits = map[string]int{}
+	if domain != "local" {
+		return limits, nil
+	}
+
+	db := fetchDB(s)
+	if db == nil {
+		return limits, staleError(s)
+	}
+
+	s.ulCacheOnce.Do(func() { s.ulCache = utils.NewCache(1024) })
+
+	key := serviceLimits{db.limitsConfig.UserLimitsVersion, user, domain, service}
+
+	cachedlimits, found := s.ulCache.Get(key)
+	limits, ok := cachedlimits.(map[string]int)
+	if found && ok {
+		return limits, nil
+	}
+
+	limits, err := getUserLimitsOnServer(s, db, user, domain, service)
+	if err != nil {
+		return limits, err
+	}
+	s.ulCache.Add(key, limits)
+	return limits, nil
+}
+
+func getUserLimitsOnServer(s *Svc, db *credsDB, user, domain, service string) (map[string]int, error) {
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
+	var limits = map[string]int{}
+	req, err := http.NewRequest("GET", db.limitsCheckURL, nil)
+	if err != nil {
+		return limits, err
+	}
+	req.SetBasicAuth(db.specialUser, db.specialPassword)
+
+	v := url.Values{}
+	v.Set("user", user)
+	v.Set("domain", domain)
+	v.Set("service", service)
+	req.URL.RawQuery = v.Encode()
+
+	hresp, err := s.httpClient.Do(req)
+	if err != nil {
+		return limits, err
+	}
+	defer hresp.Body.Close()
+	defer io.Copy(ioutil.Discard, hresp.Body)
+
+	switch hresp.StatusCode {
+	case 200:
+		body, readErr := ioutil.ReadAll(hresp.Body)
+		if readErr != nil {
+			return limits, fmt.Errorf("Unexpected readErr %v", readErr)
+		}
+		jsonErr := json.Unmarshal(body, &limits)
+		if jsonErr != nil {
+			return limits, fmt.Errorf("Unexpected json unmarshal error %v", jsonErr)
+		}
+		return limits, nil
+	}
+	return limits, fmt.Errorf("Unexpected return code %v", hresp.StatusCode)
 }
 
 type userPermission struct {
@@ -816,6 +911,16 @@ func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
 	}
 
 	return db.tlsConfig.ClientAuthType, nil
+}
+
+// GetLimitsConfig returns limits settings.
+func GetLimitsConfig(s *Svc) (LimitsConfig, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return LimitsConfig{}, staleError(s)
+	}
+
+	return db.limitsConfig, nil
 }
 
 // GetClusterEncryptionConfig returns if cross node communication needs to be
