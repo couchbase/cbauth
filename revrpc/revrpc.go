@@ -20,6 +20,7 @@ package revrpc
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -101,6 +102,50 @@ func (r *minirwc) Read(buf []byte) (n int, err error) {
 	return r.bufreader.Read(buf)
 }
 
+type jsonServerCodec struct {
+	rpc.ServerCodec
+}
+
+func newJsonServerCodec(conn io.ReadWriteCloser) *jsonServerCodec {
+	return &jsonServerCodec{jsonrpc.NewServerCodec(conn)}
+}
+
+func (c *jsonServerCodec) WriteResponse(r *rpc.Response, x interface{}) error {
+	err := c.ServerCodec.WriteResponse(r, x)
+
+	// net/rpc drops any errors returned by WriteResponse on the floor:
+	// https://cs.opensource.google/go/go/+/refs/tags/go1.17:src/net/rpc/server.go;drc=b83d073e9eb4cbd0cd5ca530f576668c49f6d0f1;l=353-356.
+	//
+	// This is probably fine for IO errors like the connection being
+	// closed. But if it's the case that we tried encoding to json
+	// something that can't be encoded, ns_server will keep waiting for a
+	// response. In addition, diagnosing what caused the encoding error is
+	// quite challenging in these cases. So we just panic on any json
+	// encoding errors to catch these cases as early as possible.
+	//
+	// See MB-47600 for more details.
+	if c.isEncodingError(err) {
+		panic(fmt.Errorf("Failed to encode revrpc response: %s\n"+
+			"Response:\n%v",
+			err.Error(), x))
+	}
+
+	return err
+}
+
+func (c *jsonServerCodec) isEncodingError(err error) bool {
+	switch err.(type) {
+	case *json.UnsupportedTypeError:
+		return true
+	case *json.UnsupportedValueError:
+		return true
+	case *json.MarshalerError:
+		return true
+	default:
+		return false
+	}
+}
+
 // Run method connects to ns_server, sets up json rpc instance and
 // handles rpc requests loop until connection is alive. Returned error
 // is always non-nil. In case connection was closed by ns_server
@@ -143,7 +188,7 @@ func (s *Service) Run(setupBody ServiceSetupCallback) error {
 		return err
 	}
 
-	codec := jsonrpc.NewServerCodec(rwc)
+	codec := newJsonServerCodec(rwc)
 	rpcServer.ServeCodec(codec)
 
 	return io.EOF
