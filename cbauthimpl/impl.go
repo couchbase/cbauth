@@ -70,6 +70,7 @@ type TLSConfig struct {
 	PreferServerCipherSuites bool
 	ClientAuthType           tls.ClientAuthType
 	present                  bool
+	PrivateKeyPassphrase     []byte
 }
 
 // LimitsConfig contains info about whether Limits needs to be enforced and what
@@ -87,12 +88,13 @@ type ClusterEncryptionConfig struct {
 }
 
 type tlsConfigImport struct {
-	MinTLSVersion      string
-	Ciphers            []uint16
-	CipherNames        []string
-	CipherOpenSSLNames []string
-	CipherOrder        bool
-	Present            bool
+	MinTLSVersion        string
+	Ciphers              []uint16
+	CipherNames          []string
+	CipherOpenSSLNames   []string
+	CipherOrder          bool
+	Present              bool
+	PrivateKeyPassphrase []byte
 }
 
 // ErrNoAuth is an error that is returned when the user credentials
@@ -943,6 +945,7 @@ func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig
 		PreferServerCipherSuites: cfg.CipherOrder,
 		ClientAuthType:           getAuthType(ClientCertAuthState),
 		present:                  cfg.Present,
+		PrivateKeyPassphrase:     cfg.PrivateKeyPassphrase,
 	}
 }
 
