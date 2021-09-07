@@ -1,4 +1,4 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.13)
 PROJECT(saslauthd-port)
 
 # This file is used by the build process for the complete Couchbase Server
