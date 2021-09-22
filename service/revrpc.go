@@ -15,6 +15,7 @@
 package service
 
 import (
+	"errors"
 	"net/rpc"
 	"sync"
 	"time"
@@ -23,7 +24,8 @@ import (
 )
 
 type serviceAPI struct {
-	mgr Manager
+	mgr                 Manager
+	autofailoverManager AutofailoverManager
 }
 
 type Void *struct{}
@@ -132,27 +134,57 @@ func (s serviceAPI) StartTopologyChange(req TopologyChange, res *Void) error {
 	return s.mgr.StartTopologyChange(req)
 }
 
+func (s serviceAPI) HealthCheck(Void, res *HealthInfo) error {
+	if s.autofailoverManager == nil {
+		return errors.New("Auto failover manager is not available")
+	}
+	info, err := s.autofailoverManager.HealthCheck()
+	if err != nil {
+		return err
+	}
+
+	*res = *info
+	return nil
+}
+
+func (s serviceAPI) IsSafe(nodeIds []NodeID, res *Void) error {
+	*res = nil
+
+	if s.autofailoverManager == nil {
+		return errors.New("Auto failover manager is not available")
+	}
+	return s.autofailoverManager.IsSafe(nodeIds)
+}
+
+func registerService(service *revrpc.Service,
+	mgr Manager, autofailoverMgr AutofailoverManager,
+	errorPolicy revrpc.BabysitErrorPolicy) error {
+	setup := func(rpc *rpc.Server) error {
+		return rpc.RegisterName("ServiceAPI",
+			&serviceAPI{mgr, autofailoverMgr})
+	}
+
+	return revrpc.BabysitService(setup, service, errorPolicy)
+}
+
 func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
+	return RegisterManagers(mgr, nil, errorPolicy)
+}
+
+func RegisterManagers(mgr Manager, autofailoverMgr AutofailoverManager,
+	errorPolicy revrpc.BabysitErrorPolicy) error {
 
 	service, err := revrpc.GetDefaultServiceFromEnv("service_api")
 	if err != nil {
 		return err
 	}
 
-	setup := func(rpc *rpc.Server) error {
-		return rpc.RegisterName("ServiceAPI", &serviceAPI{mgr})
-	}
-
-	return revrpc.BabysitService(setup, service, errorPolicy)
+	return registerService(service, mgr, autofailoverMgr, errorPolicy)
 }
 
-func RegisterManagerWithURL(mgr Manager, rurl string, errorPolicy revrpc.BabysitErrorPolicy) error {
+func RegisterManagerWithURL(mgr Manager, rurl string,
+	errorPolicy revrpc.BabysitErrorPolicy) error {
 
 	service := revrpc.MustService(rurl)
-
-	setup := func(rpc *rpc.Server) error {
-		return rpc.RegisterName("ServiceAPI", &serviceAPI{mgr})
-	}
-
-	return revrpc.BabysitService(setup, service, errorPolicy)
+	return registerService(service, mgr, nil, errorPolicy)
 }

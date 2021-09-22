@@ -110,6 +110,12 @@ type TopologyChange struct {
 	EjectNodes []NodeInfo `json:"ejectNodes"`
 }
 
+type HealthInfo struct {
+	// number of the disk failures encountered since the
+	// start of the service executable
+	DiskFailures int `json:"diskFailures"`
+}
+
 type Manager interface {
 	GetNodeInfo() (*NodeInfo, error)
 	Shutdown() error
@@ -121,4 +127,13 @@ type Manager interface {
 
 	PrepareTopologyChange(change TopologyChange) error
 	StartTopologyChange(change TopologyChange) error
+}
+
+type AutofailoverManager interface {
+	// returns HealthInfo if the service considers itself overall
+	// healthy and error otherwise
+	HealthCheck() (*HealthInfo, error)
+	// returns nil if the auto failover is safe from the service
+	// perspective for the NodeID's passed, and error otherwise
+	IsSafe(nodeUUIDs []NodeID) error
 }
