@@ -106,6 +106,8 @@ type Creds interface {
 	Name() string
 	// Domain method returns user domain (for auditing)
 	Domain() string
+	// User method returns user and domain for non auditing purpose.
+	User() (name, domain string)
 	// Uuid method returns user uuid for stats.
 	// Only present for local users.
 	Uuid() (string, error)

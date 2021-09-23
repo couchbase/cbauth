@@ -205,6 +205,11 @@ func (c *CredsImpl) Domain() string {
 	return c.domain
 }
 
+// User method returns user and domain for non-auditing purpose.
+func (c *CredsImpl) User() (name, domain string) {
+	return c.name, c.domain
+}
+
 // User uuid used for generating user stats, need not be present.
 // Only present for local users.
 func (c *CredsImpl) Uuid() (string, error) {
