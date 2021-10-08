@@ -136,8 +136,9 @@ func (s serviceAPI) StartTopologyChange(req TopologyChange, res *Void) error {
 
 func (s serviceAPI) HealthCheck(Void, res *HealthInfo) error {
 	if s.autofailoverManager == nil {
-		return errors.New("Auto failover manager is not available")
+		return errors.New("AutofailoverManager is not implemented")
 	}
+
 	info, err := s.autofailoverManager.HealthCheck()
 	if err != nil {
 		return err
@@ -151,40 +152,36 @@ func (s serviceAPI) IsSafe(nodeIds []NodeID, res *Void) error {
 	*res = nil
 
 	if s.autofailoverManager == nil {
-		return errors.New("Auto failover manager is not available")
+		return errors.New("AutofailoverManager is not implemented")
 	}
+
 	return s.autofailoverManager.IsSafe(nodeIds)
 }
 
-func registerService(service *revrpc.Service,
-	mgr Manager, autofailoverMgr AutofailoverManager,
+func registerService(service *revrpc.Service, mgr Manager,
 	errorPolicy revrpc.BabysitErrorPolicy) error {
+	autofailoverManager, _ := mgr.(AutofailoverManager)
 	setup := func(rpc *rpc.Server) error {
 		return rpc.RegisterName("ServiceAPI",
-			&serviceAPI{mgr, autofailoverMgr})
+			&serviceAPI{mgr, autofailoverManager})
 	}
 
 	return revrpc.BabysitService(setup, service, errorPolicy)
 }
 
 func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
-	return RegisterManagers(mgr, nil, errorPolicy)
-}
-
-func RegisterManagers(mgr Manager, autofailoverMgr AutofailoverManager,
-	errorPolicy revrpc.BabysitErrorPolicy) error {
 
 	service, err := revrpc.GetDefaultServiceFromEnv("service_api")
 	if err != nil {
 		return err
 	}
 
-	return registerService(service, mgr, autofailoverMgr, errorPolicy)
+	return registerService(service, mgr, errorPolicy)
 }
 
 func RegisterManagerWithURL(mgr Manager, rurl string,
 	errorPolicy revrpc.BabysitErrorPolicy) error {
 
 	service := revrpc.MustService(rurl)
-	return registerService(service, mgr, nil, errorPolicy)
+	return registerService(service, mgr, errorPolicy)
 }
