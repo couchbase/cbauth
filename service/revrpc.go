@@ -158,17 +158,6 @@ func (s serviceAPI) IsSafe(nodeIds []NodeID, res *Void) error {
 	return s.autofailoverManager.IsSafe(nodeIds)
 }
 
-func registerService(service *revrpc.Service, mgr Manager,
-	errorPolicy revrpc.BabysitErrorPolicy) error {
-	autofailoverManager, _ := mgr.(AutofailoverManager)
-	setup := func(rpc *rpc.Server) error {
-		return rpc.RegisterName("ServiceAPI",
-			&serviceAPI{mgr, autofailoverManager})
-	}
-
-	return revrpc.BabysitService(setup, service, errorPolicy)
-}
-
 func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 
 	service, err := revrpc.GetDefaultServiceFromEnv("service_api")
@@ -176,12 +165,11 @@ func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 		return err
 	}
 
-	return registerService(service, mgr, errorPolicy)
-}
+	autofailoverManager, _ := mgr.(AutofailoverManager)
+	setup := func(rpc *rpc.Server) error {
+		return rpc.RegisterName("ServiceAPI",
+			&serviceAPI{mgr, autofailoverManager})
+	}
 
-func RegisterManagerWithURL(mgr Manager, rurl string,
-	errorPolicy revrpc.BabysitErrorPolicy) error {
-
-	service := revrpc.MustService(rurl)
-	return registerService(service, mgr, errorPolicy)
+	return revrpc.BabysitService(setup, service, errorPolicy)
 }
