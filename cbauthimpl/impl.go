@@ -152,9 +152,11 @@ type credsDB struct {
 	authCheckURL            string
 	permissionCheckURL      string
 	limitsCheckURL          string
+	uuidCheckURL            string
 	specialUser             string
 	specialPassword         string
 	permissionsVersion      string
+	userVersion             string
 	authVersion             string
 	certVersion             int
 	extractUserFromCertURL  string
@@ -170,9 +172,11 @@ type Cache struct {
 	AuthCheckURL            string `json:"authCheckUrl"`
 	PermissionCheckURL      string `json:"permissionCheckUrl"`
 	LimitsCheckURL          string
+	UuidCheckURL            string
 	SpecialUser             string `json:"specialUser"`
 	PermissionsVersion      string
 	LimitsConfig            LimitsConfig
+	UserVersion             string
 	AuthVersion             string
 	CertVersion             int
 	ExtractUserFromCertURL  string                  `json:"extractUserFromCertURL"`
@@ -412,6 +416,8 @@ type Svc struct {
 	authCacheOnce       sync.Once
 	clientCertCache     *utils.Cache
 	clientCertCacheOnce sync.Once
+	uuidCacheOnce       sync.Once
+	uuidCache           *utils.Cache
 	httpClient          *http.Client
 	semaphore           semaphore
 	tlsNotifier         *tlsNotifier
@@ -424,9 +430,11 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		authCheckURL:            c.AuthCheckURL,
 		permissionCheckURL:      c.PermissionCheckURL,
 		limitsCheckURL:          c.LimitsCheckURL,
+		uuidCheckURL:            c.UuidCheckURL,
 		specialUser:             c.SpecialUser,
 		permissionsVersion:      c.PermissionsVersion,
 		limitsConfig:            c.LimitsConfig,
+		userVersion:             c.UserVersion,
 		authVersion:             c.AuthVersion,
 		certVersion:             c.CertVersion,
 		extractUserFromCertURL:  c.ExtractUserFromCertURL,
@@ -771,6 +779,84 @@ func getUserLimitsOnServer(s *Svc, db *credsDB, user, domain, service string) (m
 		return limits, nil
 	}
 	return limits, fmt.Errorf("Unexpected return code %v", hresp.StatusCode)
+}
+
+type userUUID struct {
+	version string
+	user    string
+	domain  string
+}
+
+func GetUserUuid(s *Svc, user, domain string) (string, error) {
+	if domain != "local" {
+		return "", fmt.Errorf("No UUID for user")
+	}
+
+	db := fetchDB(s)
+	if db == nil {
+		return "", staleError(s)
+	}
+
+	s.uuidCacheOnce.Do(func() { s.uuidCache = utils.NewCache(256) })
+
+	key := userUUID{db.userVersion, user, domain}
+
+	cachedUuid, found := s.uuidCache.Get(key)
+	if found {
+		return cachedUuid.(string), nil
+	}
+
+	uuid, err := getUserUuidOnServer(s, db, user, domain)
+	if err != nil {
+		return "", err
+	}
+	s.uuidCache.Add(key, uuid)
+	return uuid, nil
+}
+
+func getUserUuidOnServer(s *Svc, db *credsDB, user, domain string) (string, error) {
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
+	req, err := http.NewRequest("GET", db.uuidCheckURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.SetBasicAuth(db.specialUser, db.specialPassword)
+
+	v := url.Values{}
+	v.Set("user", user)
+	v.Set("domain", domain)
+	req.URL.RawQuery = v.Encode()
+
+	hresp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer hresp.Body.Close()
+	defer io.Copy(ioutil.Discard, hresp.Body)
+
+	if hresp.StatusCode != 200 {
+		err = fmt.Errorf("Expecting 200 from ns_server uuid endpoint. Got: %s", hresp.Status)
+		return "", err
+	}
+
+	body, readErr := ioutil.ReadAll(hresp.Body)
+	if readErr != nil {
+		return "", fmt.Errorf("Unexpected readErr %v", readErr)
+	}
+	resp := struct {
+		User, Domain, Uuid string
+	}{}
+	err = json.Unmarshal(body, &resp)
+	if err != nil {
+		return "", fmt.Errorf("Unexpected json unmarshal error %v", err)
+	}
+
+	if resp.Uuid == "" {
+		return "", fmt.Errorf("No UUID for user")
+	}
+	return resp.Uuid, nil
 }
 
 type userPermission struct {

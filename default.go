@@ -223,6 +223,14 @@ func GetUserLimits(user, domain, service string) (map[string]int, error) {
 	return Default.GetUserLimits(user, domain, service)
 }
 
+func GetUserUuid(user, domain string) (string, error) {
+	if Default == nil {
+		return "", ErrNotInitialized
+	}
+
+	return Default.GetUserUuid(user, domain)
+}
+
 // GetTLSConfig returns current tls config that contains cipher suites,
 // min TLS version, etc.
 func GetTLSConfig() (TLSConfig, error) {

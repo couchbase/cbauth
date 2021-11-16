@@ -96,6 +96,8 @@ type Authenticator interface {
 	GetLimitsConfig() (LimitsConfig, error)
 	// GetUserLimits returns users limit for a service.
 	GetUserLimits(user, domain, service string) (map[string]int, error)
+	// GetUserUuid returns uuid for a user.
+	GetUserUuid(user, domain string) (string, error)
 }
 
 // Creds type represents credentials and answers queries on this creds
@@ -238,6 +240,11 @@ func (a *authImpl) GetLimitsConfig() (LimitsConfig, error) {
 func (a *authImpl) GetUserLimits(user, domain, service string) (map[string]int, error) {
 	limits, err := cbauthimpl.GetUserLimits(a.svc, user, domain, service)
 	return limits, err
+}
+
+func (a *authImpl) GetUserUuid(user, domain string) (string, error) {
+	uuid, err := cbauthimpl.GetUserUuid(a.svc, user, domain)
+	return uuid, err
 }
 
 var _ Authenticator = (*authImpl)(nil)
