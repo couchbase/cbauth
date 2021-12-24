@@ -47,27 +47,6 @@ func serveDebugReq(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/_changes/") {
 		path := r.URL.Path[len("/_changes/")-1:]
-		err := RunObserveChildren(path, func(path string, value []byte, rev interface{}) error {
-			b, err := json.Marshal(map[string]interface{}{
-				"path":  path,
-				"value": string(value),
-				"rev":   rev,
-			})
-			if err != nil {
-				panic(err)
-			}
-			w.Write(b)
-			w.Write([]byte("\n\n"))
-			w.(http.Flusher).Flush()
-			return nil
-		}, make(chan struct{}))
-		if err != nil {
-			panic(err)
-		}
-		return
-	}
-	if strings.HasPrefix(r.URL.Path, "/_changesV2/") {
-		path := r.URL.Path[len("/_changesV2/")-1:]
 		err := RunObserveChildrenV2(path, func(e KVEntry) error {
 			emitKVEntry(w, e)
 			w.(http.Flusher).Flush()
