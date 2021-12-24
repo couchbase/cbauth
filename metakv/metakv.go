@@ -44,7 +44,7 @@ var ErrRevMismatch = errors.New("Rev mismatch")
 var errNotFound = errors.New("Not found")
 
 // KVEntry struct represents kv entry returned from ListAllChildren and
-// used as a parameter in CallbackV2
+// used as a parameter in Callback
 type KVEntry struct {
 	Path      string
 	Value     []byte
@@ -54,7 +54,7 @@ type KVEntry struct {
 
 // Callback type describes functions that receive mutations from
 // RunObserveChildren.
-type Callback func(path string, value []byte, rev interface{}) error
+type Callback func(entry KVEntry) error
 
 // CallbackV2 type describes functions that receive mutations from
 // RunObserveChildrenV2.
@@ -376,7 +376,8 @@ func RecursiveDelete(dirpath string) error {
 func IterateChildren(dirpath string, callback Callback) error {
 	return defaultStore.iterateChildren(dirpath,
 		func(e kvEntry) error {
-			return callback(e.Path, e.Value, e.Rev)
+			return callback(KVEntry{e.Path, e.Value, e.Rev,
+				e.Sensitive})
 		})
 }
 
@@ -391,7 +392,8 @@ func RunObserveChildren(dirpath string, callback Callback,
 	cancel <-chan struct{}) error {
 	return defaultStore.runObserveChildren(dirpath,
 		func(e kvEntry) error {
-			return callback(e.Path, e.Value, e.Rev)
+			return callback(KVEntry{e.Path, e.Value, e.Rev,
+				e.Sensitive})
 		}, cancel)
 }
 
