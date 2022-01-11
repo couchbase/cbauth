@@ -141,6 +141,10 @@ func (e *DBStaleError) Error() string {
 // are not recognized
 var ErrNoAuth = cbauthimpl.ErrNoAuth
 
+// ErrNoUuid is an error that is returned when the uuid for user is
+// empty
+var ErrNoUuid = cbauthimpl.ErrNoUuid
+
 // UnknownHostPortError is returned from GetMemcachedServiceAuth and
 // GetHTTPServiceAuth calls for unknown host:port arguments.
 type UnknownHostPortError string

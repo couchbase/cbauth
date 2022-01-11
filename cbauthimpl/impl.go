@@ -101,6 +101,10 @@ type tlsConfigImport struct {
 // are not recognized
 var ErrNoAuth = errors.New("Authentication failure")
 
+// ErrNoUuid is an error that is returned when the uuid for user is
+// empty
+var ErrNoUuid = errors.New("No UUID for user")
+
 // ErrCallbackAlreadyRegistered is used to signal that certificate refresh callback is already registered
 var ErrCallbackAlreadyRegistered = errors.New("Certificate refresh callback is already registered")
 
@@ -218,8 +222,7 @@ func (c *CredsImpl) User() (name, domain string) {
 // Only present for local users.
 func (c *CredsImpl) Uuid() (string, error) {
 	if c.uuid == "" {
-		err := fmt.Errorf("No UUID for user")
-		return c.uuid, err
+		return c.uuid, ErrNoUuid
 	}
 	return c.uuid, nil
 }
@@ -789,7 +792,7 @@ type userUUID struct {
 
 func GetUserUuid(s *Svc, user, domain string) (string, error) {
 	if domain != "local" {
-		return "", fmt.Errorf("No UUID for user")
+		return "", ErrNoUuid
 	}
 
 	db := fetchDB(s)
@@ -854,7 +857,7 @@ func getUserUuidOnServer(s *Svc, db *credsDB, user, domain string) (string, erro
 	}
 
 	if resp.Uuid == "" {
-		return "", fmt.Errorf("No UUID for user")
+		return "", ErrNoUuid
 	}
 	return resp.Uuid, nil
 }
