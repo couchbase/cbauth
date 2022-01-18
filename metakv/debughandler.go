@@ -47,7 +47,7 @@ func serveDebugReq(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/_changes/") {
 		path := r.URL.Path[len("/_changes/")-1:]
-		err := RunObserveChildrenV2(path, func(e KVEntry) error {
+		err := RunObserveChildren(path, func(e KVEntry) error {
 			emitKVEntry(w, e)
 			w.(http.Flusher).Flush()
 			return nil

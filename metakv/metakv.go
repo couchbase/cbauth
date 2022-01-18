@@ -56,10 +56,6 @@ type KVEntry struct {
 // RunObserveChildren.
 type Callback func(entry KVEntry) error
 
-// CallbackV2 type describes functions that receive mutations from
-// RunObserveChildrenV2.
-type CallbackV2 func(entry KVEntry) error
-
 // RevCreate is a special revision which when passed to Set will change
 // Set to Add.
 var RevCreate = &struct{}{}
@@ -389,32 +385,6 @@ func IterateChildren(dirpath string, callback Callback) error {
 // channel being closed returned error is nil. Otherwise error is
 // non-nil. Path must end on "/".
 func RunObserveChildren(dirpath string, callback Callback,
-	cancel <-chan struct{}) error {
-	return defaultStore.runObserveChildren(dirpath,
-		func(e kvEntry) error {
-			return callback(KVEntry{e.Path, e.Value, e.Rev,
-				e.Sensitive})
-		}, cancel)
-}
-
-// IterateChildrenV2 invokes given callback on every kv-pair that's
-// child of given directory path. Path must end on "/".
-func IterateChildrenV2(dirpath string, callback CallbackV2) error {
-	return defaultStore.iterateChildren(dirpath,
-		func(e kvEntry) error {
-			return callback(KVEntry{e.Path, e.Value, e.Rev,
-				e.Sensitive})
-		})
-}
-
-// RunObserveChildrenV2 invokes gen callback on every kv-pair that is
-// child of given directory path and then on every mutation of
-// affected keys. Deletions will be signalled by passing nil to value
-// argument of callback. Returns only when cancel channel is closed or
-// when children callback returns error. If exit is due to cancel
-// channel being closed returned error is nil. Otherwise error is
-// non-nil. Path must end on "/".
-func RunObserveChildrenV2(dirpath string, callback CallbackV2,
 	cancel <-chan struct{}) error {
 	return defaultStore.runObserveChildren(dirpath,
 		func(e kvEntry) error {
