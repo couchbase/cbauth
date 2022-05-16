@@ -46,6 +46,7 @@ const (
 	CFG_CHANGE_CERTS_TLSCONFIG uint64 = 1 << iota
 	CFG_CHANGE_CLUSTER_ENCRYPTION
 	CFG_CHANGE_USER_LIMITS
+	CFG_CHANGE_CLIENT_CERTS_TLSCONFIG
 	_MAX_CFG_CHANGE_FLAGS
 )
 
@@ -63,14 +64,15 @@ type ConfigRefreshCallback func(uint64) error
 // TLSConfig contains tls settings to be used by cbauth clients
 // When something in tls config changes user is notified via TLSRefreshCallback
 type TLSConfig struct {
-	MinVersion               uint16
-	CipherSuites             []uint16
-	CipherSuiteNames         []string
-	CipherSuiteOpenSSLNames  []string
-	PreferServerCipherSuites bool
-	ClientAuthType           tls.ClientAuthType
-	present                  bool
-	PrivateKeyPassphrase     []byte
+	MinVersion                 uint16
+	CipherSuites               []uint16
+	CipherSuiteNames           []string
+	CipherSuiteOpenSSLNames    []string
+	PreferServerCipherSuites   bool
+	ClientAuthType             tls.ClientAuthType
+	present                    bool
+	PrivateKeyPassphrase       []byte
+	ClientPrivateKeyPassphrase []byte
 }
 
 // LimitsConfig contains info about whether Limits needs to be enforced and what
@@ -88,13 +90,14 @@ type ClusterEncryptionConfig struct {
 }
 
 type tlsConfigImport struct {
-	MinTLSVersion        string
-	Ciphers              []uint16
-	CipherNames          []string
-	CipherOpenSSLNames   []string
-	CipherOrder          bool
-	Present              bool
-	PrivateKeyPassphrase []byte
+	MinTLSVersion              string
+	Ciphers                    []uint16
+	CipherNames                []string
+	CipherOpenSSLNames         []string
+	CipherOrder                bool
+	Present                    bool
+	PrivateKeyPassphrase       []byte
+	ClientPrivateKeyPassphrase []byte
 }
 
 // ErrNoAuth is an error that is returned when the user credentials
@@ -163,6 +166,7 @@ type credsDB struct {
 	userVersion             string
 	authVersion             string
 	certVersion             int
+	clientCertVersion       int
 	extractUserFromCertURL  string
 	clientCertAuthVersion   string
 	limitsConfig            LimitsConfig
@@ -183,6 +187,7 @@ type Cache struct {
 	UserVersion             string
 	AuthVersion             string
 	CertVersion             int
+	ClientCertVersion       int
 	ExtractUserFromCertURL  string                  `json:"extractUserFromCertURL"`
 	ClientCertAuthState     string                  `json:"clientCertAuthState"`
 	ClientCertAuthVersion   string                  `json:"clientCertAuthVersion"`
@@ -440,6 +445,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		userVersion:             c.UserVersion,
 		authVersion:             c.AuthVersion,
 		certVersion:             c.CertVersion,
+		clientCertVersion:       c.ClientCertVersion,
 		extractUserFromCertURL:  c.ExtractUserFromCertURL,
 		clientCertAuthVersion:   c.ClientCertAuthVersion,
 		clusterEncryptionConfig: c.ClusterEncryptionConfig,
@@ -563,9 +569,12 @@ func (s *Svc) needConfigRefresh(db *credsDB) uint64 {
 		return _MAX_CFG_CHANGE_FLAGS - 1
 	}
 
-	if s.db.certVersion != db.certVersion ||
-		!reflect.DeepEqual(s.db.tlsConfig, db.tlsConfig) {
+	if s.serverTLSSettingsChanged(db) {
 		changes |= CFG_CHANGE_CERTS_TLSCONFIG
+	}
+
+	if s.clientTLSSettingsChanged(db) {
+		changes |= CFG_CHANGE_CLIENT_CERTS_TLSCONFIG
 	}
 
 	if s.db.clusterEncryptionConfig != db.clusterEncryptionConfig {
@@ -577,6 +586,24 @@ func (s *Svc) needConfigRefresh(db *credsDB) uint64 {
 	}
 
 	return changes
+}
+
+func (s *Svc) serverTLSSettingsChanged(db *credsDB) bool {
+	return s.db.certVersion != db.certVersion ||
+		s.db.tlsConfig.MinVersion != db.tlsConfig.MinVersion ||
+		!reflect.DeepEqual(s.db.tlsConfig.CipherSuites,
+			db.tlsConfig.CipherSuites) ||
+		s.db.tlsConfig.PreferServerCipherSuites !=
+			db.tlsConfig.PreferServerCipherSuites ||
+		s.db.tlsConfig.ClientAuthType != db.tlsConfig.ClientAuthType ||
+		!reflect.DeepEqual(s.db.tlsConfig.PrivateKeyPassphrase,
+			db.tlsConfig.PrivateKeyPassphrase)
+}
+
+func (s *Svc) clientTLSSettingsChanged(db *credsDB) bool {
+	return s.db.clientCertVersion != db.clientCertVersion ||
+		!reflect.DeepEqual(s.db.tlsConfig.ClientPrivateKeyPassphrase,
+			db.tlsConfig.ClientPrivateKeyPassphrase)
 }
 
 func fetchDB(s *Svc) *credsDB {
@@ -1045,14 +1072,15 @@ func GetClusterEncryptionConfig(s *Svc) (ClusterEncryptionConfig, error) {
 
 func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig {
 	return TLSConfig{
-		MinVersion:               minTLSVersion(cfg.MinTLSVersion),
-		CipherSuites:             append([]uint16{}, cfg.Ciphers...),
-		CipherSuiteNames:         append([]string{}, cfg.CipherNames...),
-		CipherSuiteOpenSSLNames:  append([]string{}, cfg.CipherOpenSSLNames...),
-		PreferServerCipherSuites: cfg.CipherOrder,
-		ClientAuthType:           getAuthType(ClientCertAuthState),
-		present:                  cfg.Present,
-		PrivateKeyPassphrase:     cfg.PrivateKeyPassphrase,
+		MinVersion:                 minTLSVersion(cfg.MinTLSVersion),
+		CipherSuites:               append([]uint16{}, cfg.Ciphers...),
+		CipherSuiteNames:           append([]string{}, cfg.CipherNames...),
+		CipherSuiteOpenSSLNames:    append([]string{}, cfg.CipherOpenSSLNames...),
+		PreferServerCipherSuites:   cfg.CipherOrder,
+		ClientAuthType:             getAuthType(ClientCertAuthState),
+		present:                    cfg.Present,
+		PrivateKeyPassphrase:       cfg.PrivateKeyPassphrase,
+		ClientPrivateKeyPassphrase: cfg.ClientPrivateKeyPassphrase,
 	}
 }
 
