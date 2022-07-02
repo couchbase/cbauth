@@ -98,6 +98,8 @@ type Authenticator interface {
 	GetUserLimits(user, domain, service string) (map[string]int, error)
 	// GetUserUuid returns uuid for a user.
 	GetUserUuid(user, domain string) (string, error)
+	// GetUserBuckets returns buckets a user has permissions for
+	GetUserBuckets(user, domain string) ([]string, error)
 }
 
 // Creds type represents credentials and answers queries on this creds
@@ -249,6 +251,11 @@ func (a *authImpl) GetUserLimits(user, domain, service string) (map[string]int, 
 func (a *authImpl) GetUserUuid(user, domain string) (string, error) {
 	uuid, err := cbauthimpl.GetUserUuid(a.svc, user, domain)
 	return uuid, err
+}
+
+func (a *authImpl) GetUserBuckets(user, domain string) ([]string, error) {
+	bucketsAndPerms, err := cbauthimpl.GetUserBuckets(a.svc, user, domain)
+	return bucketsAndPerms, err
 }
 
 var _ Authenticator = (*authImpl)(nil)

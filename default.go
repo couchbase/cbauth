@@ -231,6 +231,14 @@ func GetUserUuid(user, domain string) (string, error) {
 	return Default.GetUserUuid(user, domain)
 }
 
+func GetUserBuckets(user, domain string) ([]string, error) {
+	if Default == nil {
+		return []string{}, ErrNotInitialized
+	}
+
+	return Default.GetUserBuckets(user, domain)
+}
+
 // GetTLSConfig returns current tls config that contains cipher suites,
 // min TLS version, etc.
 func GetTLSConfig() (TLSConfig, error) {

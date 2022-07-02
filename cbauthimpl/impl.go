@@ -160,6 +160,7 @@ type credsDB struct {
 	permissionCheckURL      string
 	limitsCheckURL          string
 	uuidCheckURL            string
+	userBucketsURL          string
 	specialUser             string
 	specialPassword         string
 	permissionsVersion      string
@@ -181,6 +182,7 @@ type Cache struct {
 	PermissionCheckURL      string `json:"permissionCheckUrl"`
 	LimitsCheckURL          string
 	UuidCheckURL            string
+	UserBucketsURL          string
 	SpecialUser             string `json:"specialUser"`
 	PermissionsVersion      string
 	LimitsConfig            LimitsConfig
@@ -426,6 +428,8 @@ type Svc struct {
 	clientCertCacheOnce sync.Once
 	uuidCacheOnce       sync.Once
 	uuidCache           *utils.Cache
+	userBktsCacheOnce   sync.Once
+	userBktsCache       *utils.Cache
 	httpClient          *http.Client
 	semaphore           semaphore
 	tlsNotifier         *tlsNotifier
@@ -439,6 +443,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		permissionCheckURL:      c.PermissionCheckURL,
 		limitsCheckURL:          c.LimitsCheckURL,
 		uuidCheckURL:            c.UuidCheckURL,
+		userBucketsURL:          c.UserBucketsURL,
 		specialUser:             c.SpecialUser,
 		permissionsVersion:      c.PermissionsVersion,
 		limitsConfig:            c.LimitsConfig,
@@ -887,6 +892,75 @@ func getUserUuidOnServer(s *Svc, db *credsDB, user, domain string) (string, erro
 		return "", ErrNoUuid
 	}
 	return resp.Uuid, nil
+}
+
+type userBuckets struct {
+	version string
+	user    string
+	domain  string
+}
+
+func GetUserBuckets(s *Svc, user, domain string) ([]string, error) {
+	var bucketAndPerms = []string{}
+	db := fetchDB(s)
+	if db == nil {
+		return bucketAndPerms, staleError(s)
+	}
+
+	s.userBktsCacheOnce.Do(func() { s.userBktsCache = utils.NewCache(1024) })
+
+	key := userBuckets{db.permissionsVersion, user, domain}
+
+	cachedUserBuckets, found := s.userBktsCache.Get(key)
+	bucketAndPerms, ok := cachedUserBuckets.([]string)
+	if found && ok {
+		return bucketAndPerms, nil
+	}
+
+	bucketAndPerms, err := getUserBucketsOnServer(s, db, user, domain)
+	if err != nil {
+		return bucketAndPerms, err
+	}
+	s.userBktsCache.Add(key, bucketAndPerms)
+	return bucketAndPerms, nil
+}
+
+func getUserBucketsOnServer(s *Svc, db *credsDB, user, domain string) ([]string, error) {
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
+	var bucketsAndPerms = []string{}
+	req, err := http.NewRequest("GET", db.userBucketsURL, nil)
+	if err != nil {
+		return bucketsAndPerms, err
+	}
+	req.SetBasicAuth(db.specialUser, db.specialPassword)
+
+	v := url.Values{}
+	v.Set("user", user)
+	v.Set("domain", domain)
+	req.URL.RawQuery = v.Encode()
+
+	hresp, err := s.httpClient.Do(req)
+	if err != nil {
+		return bucketsAndPerms, err
+	}
+	defer hresp.Body.Close()
+	defer io.Copy(ioutil.Discard, hresp.Body)
+
+	switch hresp.StatusCode {
+	case 200:
+		body, readErr := ioutil.ReadAll(hresp.Body)
+		if readErr != nil {
+			return bucketsAndPerms, fmt.Errorf("Unexpected readErr %v", readErr)
+		}
+		jsonErr := json.Unmarshal(body, &bucketsAndPerms)
+		if jsonErr != nil {
+			return bucketsAndPerms, fmt.Errorf("Unexpected json unmarshal error %v", jsonErr)
+		}
+		return bucketsAndPerms, nil
+	}
+	return bucketsAndPerms, fmt.Errorf("Unexpected return code %v", hresp.StatusCode)
 }
 
 type userPermission struct {
