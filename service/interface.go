@@ -47,8 +47,10 @@ type Topology struct {
 type TaskType string
 
 const (
-	TaskTypeRebalance = TaskType("task-rebalance")
-	TaskTypePrepared  = TaskType("task-prepared")
+	TaskTypeRebalance    = TaskType("task-rebalance")
+	TaskTypePrepared     = TaskType("task-prepared")
+	TaskTypeBucketPause  = TaskType("task-pause-bucket")
+	TaskTypeBucketResume = TaskType("task-resume-bucket")
 )
 
 type TaskStatus string
@@ -56,6 +58,11 @@ type TaskStatus string
 const (
 	TaskStatusRunning = TaskStatus("task-running")
 	TaskStatusFailed  = TaskStatus("task-failed")
+
+	// TaskStatusCannotResume is a special task status used only during the
+	// dry_run phase for "resuming a bucket".
+
+	TaskStatusCannotResume = TaskStatus("task-status-cannot-resume")
 )
 
 type Task struct {
@@ -144,4 +151,25 @@ type ServerlessManager interface {
 	// returns projected utilization stats if the service would
 	// be defragmented
 	GetDefragmentedUtilization() (*DefragmentedUtilizationInfo, error)
+}
+
+type PauseParams struct {
+	ID         string `json:"id"`
+	Bucket     string `json:"bucket"`
+	RemotePath string `json:"remotePath"`
+}
+
+type ResumeParams struct {
+	ID         string `json:"id"`
+	Bucket     string `json:"bucket"`
+	RemotePath string `json:"remotePath"`
+	DryRun     bool   `json:"dryRun"`
+}
+
+type HibernationManager interface {
+	PreparePause(params PauseParams) error
+	Pause(params PauseParams) error
+
+	PrepareResume(params ResumeParams) error
+	Resume(params ResumeParams) error
 }

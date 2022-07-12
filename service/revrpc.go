@@ -27,6 +27,7 @@ type serviceAPI struct {
 	mgr                 Manager
 	autofailoverManager AutofailoverManager
 	serverlessManager   ServerlessManager
+	hibernationManager  HibernationManager
 }
 
 type Void *struct{}
@@ -182,6 +183,42 @@ func (s serviceAPI) GetDefragmentedUtilization(Void,
 	return nil
 }
 
+func (s serviceAPI) Pause(params PauseParams, res *Void) error {
+	*res = nil
+
+	if s.hibernationManager == nil {
+		return errors.New("HibernationManager is not implemented")
+	}
+	return s.hibernationManager.Pause(params)
+}
+
+func (s serviceAPI) PreparePause(params PauseParams, res *Void) error {
+	*res = nil
+
+	if s.hibernationManager == nil {
+		return errors.New("HibernationManager is not implemented")
+	}
+	return s.hibernationManager.PreparePause(params)
+}
+
+func (s serviceAPI) PrepareResume(params ResumeParams, res *Void) error {
+	*res = nil
+
+	if s.hibernationManager == nil {
+		return errors.New("HibernationManager is not implemented")
+	}
+	return s.hibernationManager.PrepareResume(params)
+}
+
+func (s serviceAPI) Resume(params ResumeParams, res *Void) error {
+	*res = nil
+
+	if s.hibernationManager == nil {
+		return errors.New("HibernationManager is not implemented")
+	}
+	return s.hibernationManager.Resume(params)
+}
+
 func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 
 	service, err := revrpc.GetDefaultServiceFromEnv("service_api")
@@ -191,10 +228,12 @@ func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 
 	autofailoverManager, _ := mgr.(AutofailoverManager)
 	serverlessManager, _ := mgr.(ServerlessManager)
+	hibernationManager, _ := mgr.(HibernationManager)
+
 	setup := func(rpc *rpc.Server) error {
 		return rpc.RegisterName("ServiceAPI",
-			&serviceAPI{mgr, autofailoverManager,
-				serverlessManager})
+			&serviceAPI{mgr, autofailoverManager, serverlessManager,
+				hibernationManager})
 	}
 
 	return revrpc.BabysitService(setup, service, errorPolicy)
