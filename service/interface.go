@@ -137,3 +137,11 @@ type AutofailoverManager interface {
 	// perspective for the NodeID's passed, and error otherwise
 	IsSafe(nodeUUIDs []NodeID) error
 }
+
+type DefragmentedUtilizationInfo map[string]map[string]interface{}
+
+type ServerlessManager interface {
+	// returns projected utilization stats if the service would
+	// be defragmented
+	GetDefragmentedUtilization() (*DefragmentedUtilizationInfo, error)
+}

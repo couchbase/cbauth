@@ -26,6 +26,7 @@ import (
 type serviceAPI struct {
 	mgr                 Manager
 	autofailoverManager AutofailoverManager
+	serverlessManager   ServerlessManager
 }
 
 type Void *struct{}
@@ -158,6 +159,29 @@ func (s serviceAPI) IsSafe(nodeIds []NodeID, res *Void) error {
 	return s.autofailoverManager.IsSafe(nodeIds)
 }
 
+// For some strange reason golang jsonrpc doesn't allow to return
+// any marshallable type except struct. So we have to wrap map returned
+// by the service into structure to deal with this peculiarity.
+type DefragmentedUtilizationReply struct {
+	Info *DefragmentedUtilizationInfo
+}
+
+func (s serviceAPI) GetDefragmentedUtilization(Void,
+	res *DefragmentedUtilizationReply) error {
+
+	if s.serverlessManager == nil {
+		return errors.New("ServerlessManager is not implemented")
+	}
+
+	info, err := s.serverlessManager.GetDefragmentedUtilization()
+	if err != nil {
+		return err
+	}
+
+	res.Info = info
+	return nil
+}
+
 func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 
 	service, err := revrpc.GetDefaultServiceFromEnv("service_api")
@@ -166,9 +190,11 @@ func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 	}
 
 	autofailoverManager, _ := mgr.(AutofailoverManager)
+	serverlessManager, _ := mgr.(ServerlessManager)
 	setup := func(rpc *rpc.Server) error {
 		return rpc.RegisterName("ServiceAPI",
-			&serviceAPI{mgr, autofailoverManager})
+			&serviceAPI{mgr, autofailoverManager,
+				serverlessManager})
 	}
 
 	return revrpc.BabysitService(setup, service, errorPolicy)
