@@ -57,6 +57,7 @@ type Service struct {
 // ErrAlreadyRunning is returned from Run method to indicate that
 // given Service instance is already running.
 var ErrAlreadyRunning = errors.New("service is already running")
+var ErrRevRpcUnauthorized = errors.New("invalid revrpc credentials")
 
 // NewService creates and returns Service instance that connects to
 // given ns_server url (which is expected to have creds
@@ -146,6 +147,42 @@ func (c *jsonServerCodec) isEncodingError(err error) bool {
 	}
 }
 
+type RevrpcSvc struct {
+	service *Service
+}
+
+type URLChange struct {
+	NewURL string `json:"newURL"`
+}
+
+type URLChangeResult struct {
+	IsSucc      bool   `json:"isSucc"`
+	Description string `json:"description"`
+}
+
+func (s *RevrpcSvc) UpdateURL(urlChange URLChange, res *URLChangeResult) error {
+	rv := MustService(urlChange.NewURL)
+	req, _ := http.NewRequest("RPCCONNECT", rv.url.String()+"/test", nil)
+	req.SetBasicAuth(rv.user, rv.pwd)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		*res = URLChangeResult{IsSucc: false, Description: err.Error()}
+		return nil
+	}
+	if resp.StatusCode != 200 {
+		err = fmt.Errorf("test RPCCONNECT failed: need 200 status!. Got %v", *resp)
+		print(err)
+		*res = URLChangeResult{IsSucc: false, Description: err.Error()}
+		return nil
+	}
+
+	s.service.url = rv.url
+	s.service.user = rv.user
+	s.service.pwd = rv.pwd
+	*res = URLChangeResult{IsSucc: true, Description: ""}
+	return nil
+}
+
 // Run method connects to ns_server, sets up json rpc instance and
 // handles rpc requests loop until connection is alive. Returned error
 // is always non-nil. In case connection was closed by ns_server
@@ -179,11 +216,15 @@ func (s *Service) Run(setupBody ServiceSetupCallback) error {
 		return err
 	}
 	if resp.StatusCode != 200 {
+		if resp.StatusCode == 401 {
+			return ErrRevRpcUnauthorized
+		}
 		return fmt.Errorf("Need 200 status!. Got %v", *resp)
 	}
 
 	rpcServer := rpc.NewServer()
 	err = setupBody(rpcServer)
+	rpcServer.RegisterName("revrpc", &RevrpcSvc{service: s})
 	if err != nil {
 		return err
 	}
@@ -236,6 +277,9 @@ var DefaultBabysitErrorPolicy BabysitErrorPolicy = DefaultErrorPolicy{
 }
 
 func (p *DefaultErrorPolicy) try(err error) error {
+	if err == ErrRevRpcUnauthorized {
+		return err
+	}
 	if p.RestartsToExit >= 0 {
 		p.restartsLeft--
 		if p.restartsLeft <= 0 {

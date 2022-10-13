@@ -307,22 +307,36 @@ func TestUnknownHostPortErrorFormatting(t *testing.T) {
 
 func TestStaleErrorFormatting(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
+		Path := r.URL.Path
+		if Path == "/unauthenticated" {
+			w.WriteHeader(http.StatusUnauthorized)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer s.Close()
 
-	rpcsvc := revrpc.MustService(s.URL + "/test")
+	oldDef := revrpc.DefaultBabysitErrorPolicy.(revrpc.DefaultErrorPolicy)
+	defer func() {
+		revrpc.DefaultBabysitErrorPolicy = oldDef
+	}()
+	tmpDef := oldDef
+	tmpDef.RestartsToExit = 1
+	revrpc.DefaultBabysitErrorPolicy = tmpDef
+
+	commonPrefix := "CBAuth database is stale: last reason: "
+	notFoundErr := commonPrefix + "Need 200 status!. Got {404"
+	CheckStaleErrorFormatting(t, s.URL+"/test", notFoundErr)
+	invalidCredsErr := commonPrefix + "invalid revrpc credentials"
+	CheckStaleErrorFormatting(t, s.URL+"/unauthenticated", invalidCredsErr)
+}
+
+func CheckStaleErrorFormatting(t *testing.T, URL string, expectedErrorPrefix string) {
+	rpcsvc := revrpc.MustService(URL)
 	a := newAuth(10 * time.Second)
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		oldDef := revrpc.DefaultBabysitErrorPolicy.(revrpc.DefaultErrorPolicy)
-		defer func() {
-			revrpc.DefaultBabysitErrorPolicy = oldDef
-		}()
-		tmpDef := oldDef
-		tmpDef.RestartsToExit = 1
-		revrpc.DefaultBabysitErrorPolicy = tmpDef
 		runRPCForSvc(rpcsvc, a.svc)
 		wg.Done()
 	}()
@@ -334,8 +348,7 @@ func TestStaleErrorFormatting(t *testing.T) {
 	}
 	errString := se.Error()
 	t.Log("error string: ", errString)
-	expectedString := "CBAuth database is stale: last reason: Need 200 status!. Got "
-	if errString[:len(expectedString)] != expectedString {
+	if errString[:len(expectedErrorPrefix)] != expectedErrorPrefix {
 		t.Fatalf("Expecting specific prefix of stale error. Got %s", errString)
 	}
 	wg.Wait()

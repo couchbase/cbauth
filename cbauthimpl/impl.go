@@ -162,7 +162,7 @@ type credsDB struct {
 	uuidCheckURL            string
 	userBucketsURL          string
 	specialUser             string
-	specialPassword         string
+	specialPasswords        []string
 	permissionsVersion      string
 	userVersion             string
 	authVersion             string
@@ -183,7 +183,8 @@ type Cache struct {
 	LimitsCheckURL          string
 	UuidCheckURL            string
 	UserBucketsURL          string
-	SpecialUser             string `json:"specialUser"`
+	SpecialUser             string   `json:"specialUser"`
+	SpecialPasswords        []string `json:"specialPasswords"`
 	PermissionsVersion      string
 	LimitsConfig            LimitsConfig
 	UserVersion             string
@@ -241,7 +242,15 @@ func (c *CredsImpl) IsAllowed(permission string) (bool, error) {
 }
 
 func verifySpecialCreds(db *credsDB, user, password string) bool {
-	return len(user) > 0 && user[0] == '@' && password == db.specialPassword
+	if len(user) == 0 || user[0] != '@' {
+		return false
+	}
+	for _, sp := range db.specialPasswords {
+		if password == sp {
+			return true
+		}
+	}
+	return false
 }
 
 type semaphore chan int
@@ -445,6 +454,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		uuidCheckURL:            c.UuidCheckURL,
 		userBucketsURL:          c.UserBucketsURL,
 		specialUser:             c.SpecialUser,
+		specialPasswords:        c.SpecialPasswords,
 		permissionsVersion:      c.PermissionsVersion,
 		limitsConfig:            c.LimitsConfig,
 		userVersion:             c.UserVersion,
@@ -455,12 +465,6 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		clientCertAuthVersion:   c.ClientCertAuthVersion,
 		clusterEncryptionConfig: c.ClusterEncryptionConfig,
 		tlsConfig:               importTLSConfig(&c.TLSConfig, c.ClientCertAuthState),
-	}
-	for _, node := range db.nodes {
-		if node.Local {
-			db.specialPassword = node.Password
-			break
-		}
 	}
 	return
 }
@@ -786,7 +790,9 @@ func getUserLimitsOnServer(s *Svc, db *credsDB, user, domain, service string) (m
 	if err != nil {
 		return limits, err
 	}
-	req.SetBasicAuth(db.specialUser, db.specialPassword)
+	if len(db.specialPasswords) > 0 {
+		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
+	}
 
 	v := url.Values{}
 	v.Set("user", user)
@@ -857,8 +863,9 @@ func getUserUuidOnServer(s *Svc, db *credsDB, user, domain string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	req.SetBasicAuth(db.specialUser, db.specialPassword)
-
+	if len(db.specialPasswords) > 0 {
+		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
+	}
 	v := url.Values{}
 	v.Set("user", user)
 	v.Set("domain", domain)
@@ -934,8 +941,9 @@ func getUserBucketsOnServer(s *Svc, db *credsDB, user, domain string) ([]string,
 	if err != nil {
 		return bucketsAndPerms, err
 	}
-	req.SetBasicAuth(db.specialUser, db.specialPassword)
-
+	if len(db.specialPasswords) > 0 {
+		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
+	}
 	v := url.Values{}
 	v.Set("user", user)
 	v.Set("domain", domain)
@@ -1005,8 +1013,9 @@ func checkPermissionOnServer(s *Svc, db *credsDB, user, domain, permission strin
 	if err != nil {
 		return false, err
 	}
-	req.SetBasicAuth(db.specialUser, db.specialPassword)
-
+	if len(db.specialPasswords) > 0 {
+		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
+	}
 	v := url.Values{}
 	v.Set("user", user)
 	v.Set("domain", domain)
@@ -1279,8 +1288,9 @@ func getUserIdentityFromCert(cert *x509.Certificate, db *credsDB, s *Svc) (*Cred
 		return nil, err
 	}
 	req.Header.Add("Content-Type", "application/octet-stream")
-	req.SetBasicAuth(db.specialUser, db.specialPassword)
-
+	if len(db.specialPasswords) > 0 {
+		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
+	}
 	rv, err := executeReqAndGetCreds(s, req)
 	if err != nil {
 		return nil, err
