@@ -169,6 +169,9 @@ func (s *RevrpcSvc) UpdateURL(urlChange URLChange, res *URLChangeResult) error {
 		*res = URLChangeResult{IsSucc: false, Description: err.Error()}
 		return nil
 	}
+
+	defer resp.Body.Close()
+
 	if resp.StatusCode != 200 {
 		err = fmt.Errorf("test RPCCONNECT failed: need 200 status!. Got %v", *resp)
 		print(err)
