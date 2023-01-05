@@ -1,10 +1,12 @@
 package cbauth
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -63,16 +65,48 @@ func newCache(a *authImpl) *cbauthimpl.Cache {
 	return &cbauthimpl.Cache{
 		AuthCheckURL:       url + "/_auth",
 		PermissionCheckURL: url + "/_permissions",
+		UserBucketsURL:     url + "/_getUserBuckets",
+		UuidCheckURL:       url + "/_getUserUuid",
 	}
 }
 
+// GetUserUuid and GetUserBuckets return a result for {user, domain}
+type ReqKey struct {
+	user   string
+	domain string
+}
+
+// IsAllowed returns a result for {user, domain, permission}
+type ReqKeyPerm struct {
+	user       string
+	domain     string
+	permission string
+}
+
+// {req}Map stores expected results for GetUserUuid/GetUserBuckets/IsAllowed
+// {req}Hit tracks whether the result should be served from the cache
+type GetReqTestInfo struct {
+	uuidMap     map[ReqKey]string
+	bucketsMap  map[ReqKey][]string
+	permMap     map[ReqKeyPerm]bool
+	uuidHit     map[ReqKey]bool
+	bucketsHit  map[ReqKey]bool
+	permHit     map[ReqKeyPerm]bool
+	users       []string
+	domains     []string
+	permissions []string
+	numCombos   int
+}
+
 type testingRoundTripper struct {
-	t       *testing.T
-	baseURL string
-	user    string
-	domain  string
-	token   string
-	tripped bool
+	t                   *testing.T
+	info                *GetReqTestInfo
+	baseURL             string
+	user                string
+	domain              string
+	token               string
+	tripped             bool
+	disableSerialChecks bool
 }
 
 func newTestingRT(t *testing.T) *testingRoundTripper {
@@ -94,6 +128,10 @@ func (rt *testingRoundTripper) RoundTrip(req *http.Request) (res *http.Response,
 		return rt.authRoundTrip(req)
 	case req.Method == "GET" && strings.HasPrefix(path, "/_permissions"):
 		return rt.permissionsRoundTrip(req)
+	case req.Method == "GET" && strings.HasPrefix(path, "/_getUserUuid"):
+		return rt.uuidRoundTrip(req)
+	case req.Method == "GET" && strings.HasPrefix(path, "/_getUserBuckets"):
+		return rt.bucketsRoundTrip(req)
 	}
 
 	log.Fatalf("Unrecognized call, method: %s, path: %s", req.Method, path)
@@ -135,35 +173,130 @@ func (rt *testingRoundTripper) permissionsRoundTrip(req *http.Request) (res *htt
 		log.Fatalf("Missing parameters in request: %s", req.URL.String())
 	}
 
+	rt.setTripped()
 	statusCode := 401
 
-	switch domain[0] {
-	case "admin":
-		statusCode = 200
-	case "bucket":
-		if permission[0] == "cluster.bucket["+user[0]+"].data!write" {
+	if rt.info == nil {
+		switch domain[0] {
+		case "admin":
+			statusCode = 200
+		case "bucket":
+			if permission[0] == "cluster.bucket["+user[0]+"].data!write" {
+				statusCode = 200
+			}
+		case "anonymous":
+			if permission[0] == "cluster.bucket[default].data!write" {
+				statusCode = 200
+			}
+		}
+	} else {
+		// TestGetProcessRequest compares results with those in rt.info
+		key := ReqKeyPerm{
+			user:       user[0],
+			domain:     domain[0],
+			permission: permission[0],
+		}
+
+		if !rt.disableSerialChecks && rt.info.permHit[key] {
+			log.Fatalf("Unexpected IsAllowed cache miss: %s %s %s",
+				key.user, key.domain, key.permission)
+		}
+		allowed := rt.info.permMap[key]
+		if allowed {
 			statusCode = 200
 		}
-	case "anonymous":
-		if permission[0] == "cluster.bucket[default].data!write" {
-			statusCode = 200
+		if !rt.disableSerialChecks && key.domain != "external" {
+			rt.info.permHit[key] = true
 		}
 	}
 	return respond(req, statusCode, ""), nil
 }
 
-func (rt *testingRoundTripper) authRoundTrip(req *http.Request) (res *http.Response, err error) {
-	if rt.tripped {
-		log.Fatalf("Already tripped")
+func (rt *testingRoundTripper) uuidRoundTrip(req *http.Request) (res *http.Response, err error) {
+	params := req.URL.Query()
+	user := params["user"]
+	domain := params["domain"]
+
+	if user == nil || domain == nil {
+		log.Fatalf("Missing parameters in request: %s", req.URL.String())
 	}
 
-	rt.tripped = true
+	if domain[0] != "local" {
+		log.Fatalf("Unexpected domain: %s", domain[0])
+	}
+
+	rt.setTripped()
+
+	key := ReqKey{
+		user:   user[0],
+		domain: domain[0],
+	}
+
+	if !rt.disableSerialChecks && rt.info.uuidHit[key] {
+		log.Fatalf("Unexpected GetUserUuid cache miss: %s %s",
+			key.user, key.domain)
+	}
+
+	uuid := rt.info.uuidMap[key]
+	if !rt.disableSerialChecks {
+		rt.info.uuidHit[key] = true
+	}
+
+	resp := make(map[string]string)
+	resp["user"] = key.user
+	resp["domain"] = key.domain
+	resp["uuid"] = uuid
+	jsonResp, err := json.Marshal(resp)
+	if err != nil {
+		log.Fatalf("Error happened in JSON marshal. Err: %s", err)
+	}
+
+	return respond(req, 200, string(jsonResp)), nil
+}
+
+func (rt *testingRoundTripper) bucketsRoundTrip(req *http.Request) (res *http.Response, err error) {
+	params := req.URL.Query()
+	user := params["user"]
+	domain := params["domain"]
+
+	if user == nil || domain == nil {
+		log.Fatalf("Missing parameters in request: %s", req.URL.String())
+	}
+
+	rt.setTripped()
+
+	key := ReqKey{
+		user:   user[0],
+		domain: domain[0],
+	}
+
+	if !rt.disableSerialChecks && rt.info.bucketsHit[key] {
+		log.Fatalf("Unexpected GetUserBuckets cache miss: %s %s",
+			key.user, key.domain)
+	}
+
+	buckets := rt.info.bucketsMap[key]
+	if !rt.disableSerialChecks {
+		rt.info.bucketsHit[key] = true
+	}
+
+	jsonResp, err := json.Marshal(buckets)
+	if err != nil {
+		log.Fatalf("Error happened in JSON marshal. Err: %s", err)
+	}
+
+	return respond(req, 200, string(jsonResp)), nil
+}
+
+func (rt *testingRoundTripper) authRoundTrip(req *http.Request) (res *http.Response, err error) {
+	rt.assertTripped(rt.t, false)
+	rt.setTripped()
 
 	statusCode := 200
 
 	if req.Header.Get("ns-server-ui") == "yes" {
 		token, err := req.Cookie("ui-auth-q")
-		if err != nil || rt.token != token.Value {
+		if err != nil || (!rt.disableSerialChecks && rt.token != token.Value) {
 			statusCode = 401
 		}
 	} else {
@@ -172,22 +305,49 @@ func (rt *testingRoundTripper) authRoundTrip(req *http.Request) (res *http.Respo
 
 	response := ""
 	if statusCode == 200 {
-		response = fmt.Sprintf(`{"user": "%s", "domain": "%s"}`, rt.user, rt.domain)
+		if rt.info == nil {
+			response = fmt.Sprintf(`{"user": "%s", "domain": "%s"}`, rt.user, rt.domain)
+		} else {
+			user, err1 := req.Cookie("user")
+			domain, err2 := req.Cookie("domain")
+			if err1 == nil && err2 == nil {
+				response = fmt.Sprintf(`{"user": "%s", "domain": "%s"}`,
+					user.Value, domain.Value)
+			} else {
+				log.Fatal("Error parsing user and domain")
+			}
+		}
 	}
 
 	return respond(req, statusCode, response), nil
 }
 
+func (rt *testingRoundTripper) setTripped() {
+	if !rt.disableSerialChecks {
+		rt.tripped = true
+	}
+}
+
+func (rt *testingRoundTripper) resetTripped() {
+	if !rt.disableSerialChecks {
+		rt.tripped = false
+	}
+}
+
 func (rt *testingRoundTripper) assertTripped(t *testing.T, expected bool) {
-	if rt.tripped != expected {
+	if rt.disableSerialChecks {
+		return
+	} else if rt.tripped != expected {
 		t.Fatalf("Tripped is not expected. Have: %v, need: %v", rt.tripped, expected)
 	}
 }
 
 func (rt *testingRoundTripper) setTokenAuth(user, domain, token string) {
-	rt.token = token
-	rt.domain = domain
-	rt.user = user
+	if !rt.disableSerialChecks {
+		rt.token = token
+		rt.domain = domain
+		rt.user = user
+	}
 }
 
 func TestStaleBasic(t *testing.T) {
@@ -299,6 +459,213 @@ func TestTokenAdmin(t *testing.T) {
 	if c.Domain() != "builtin" {
 		t.Errorf("Expect source to be builtin. Got %s", c.Domain())
 	}
+}
+
+func initTestHandleGetRequestParams(info *GetReqTestInfo) {
+	info.bucketsHit = make(map[ReqKey]bool)
+	info.bucketsMap = make(map[ReqKey][]string)
+	info.permHit = make(map[ReqKeyPerm]bool)
+	info.permMap = make(map[ReqKeyPerm]bool)
+	info.uuidHit = make(map[ReqKey]bool)
+	info.uuidMap = make(map[ReqKey]string)
+
+	info.domains = []string{"admin", "local", "external"}
+	info.users = []string{"user0", "Administrator", "br", "testing", "12ekf293fk"}
+	info.permissions = []string{"cluster.bucket[default].data!read",
+		"cluster.bucket[default].data!write"}
+
+	buckets := []string{"N1QL", "travel-sample", "non-sequitur"}
+
+	for i, domain := range info.domains {
+		for j, user := range info.users {
+			key := ReqKey{user: user, domain: domain}
+			bkts := []string{}
+			index := i + j + 1
+			if index%2 == 0 {
+				bkts = append(bkts, buckets[0])
+			}
+			if index%3 == 0 {
+				bkts = append(bkts, buckets[1])
+			}
+			if index%5 == 0 {
+				bkts = append(bkts, buckets[2])
+			}
+
+			info.bucketsMap[key] = bkts
+			if domain == "local" {
+				letter := string(rune(65 + index))
+				info.uuidMap[key] = strings.Repeat(letter, 8)
+			}
+
+			permKey := ReqKeyPerm{user: user, domain: domain,
+				permission: info.permissions[index%2]}
+			info.permMap[permKey] = true
+		}
+	}
+	info.numCombos = len(info.domains) * len(info.users) *
+		len(info.permissions)
+}
+
+func getRequestBuckets(rt *testingRoundTripper, a *authImpl, user, domain string) {
+	key := ReqKey{user: user, domain: domain}
+	cacheMiss := !rt.info.bucketsHit[key]
+	testStr := fmt.Sprintf("GetUserBuckets(%s %s)", user, domain)
+
+	rt.resetTripped()
+	bkts, err := a.GetUserBuckets(user, domain)
+	rt.assertTripped(rt.t, cacheMiss)
+
+	if err != nil {
+		rt.t.Fatalf("%s failed with: %s", testStr, err)
+	}
+	if !reflect.DeepEqual(bkts, rt.info.bucketsMap[key]) {
+		rt.t.Fatalf("%s incorrect. Expected:%s Got:%s cacheMiss:%t",
+			testStr, rt.info.bucketsMap[key], bkts, cacheMiss)
+	}
+	rt.t.Logf("%s request returned:%s cacheMiss:%t", testStr, bkts, cacheMiss)
+}
+
+func getRequestUuid(rt *testingRoundTripper, a *authImpl, user, domain string) {
+	key := ReqKey{user: user, domain: domain}
+	cacheMiss := domain == "local" && !rt.info.uuidHit[key]
+	testStr := fmt.Sprintf("GetUserUuid(%s %s)", user, domain)
+
+	rt.resetTripped()
+	uuid, err := a.GetUserUuid(user, domain)
+	rt.assertTripped(rt.t, cacheMiss)
+
+	if uuid == "" && err != ErrNoUuid {
+		rt.t.Fatalf("%s did not fail with: %s", testStr, ErrNoUuid)
+	}
+	if uuid != rt.info.uuidMap[key] {
+		rt.t.Fatalf("%s incorrect. Expected:%s Got:%s cacheMiss:%t",
+			testStr, rt.info.uuidMap[key], uuid, cacheMiss)
+	}
+	rt.t.Logf("%s request returned:%s cacheMiss:%t", testStr, uuid, cacheMiss)
+}
+
+func getRequestPerm(rt *testingRoundTripper, a *authImpl, user, domain, perm string) {
+	// This request is used only to initialize Creds to the user, domain to call
+	// Creds.IsAllowed (to exercise checkPermission cache).
+	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
+	must(err)
+	cookieStr := fmt.Sprintf("ui-auth-q=1234567890;user=%s;domain=%s", user, domain)
+	req.Header.Set("Cookie", cookieStr)
+	req.Header.Set("ns-server-ui", "yes")
+	rt.resetTripped()
+	c, err := a.AuthWebCreds(req)
+	must(err)
+	rt.assertTripped(rt.t, true)
+
+	permKey := ReqKeyPerm{user: user, domain: domain,
+		permission: perm}
+	cacheMiss := !rt.info.permHit[permKey] || domain == "external"
+	testStr := fmt.Sprintf("IsAllowed(%s %s %s)", user, domain, perm)
+
+	rt.resetTripped()
+	result, err := c.IsAllowed(perm)
+	rt.assertTripped(rt.t, cacheMiss)
+
+	if err != nil {
+		rt.t.Fatalf("%s failed with: %s", testStr, err)
+	}
+	if result != rt.info.permMap[permKey] {
+		rt.t.Fatalf("%s incorrect. Expected:%t Got:%t cacheMiss:%t",
+			testStr, rt.info.permMap[permKey], result, cacheMiss)
+	}
+	rt.t.Logf("%s request returned:%t cacheMiss:%t", testStr, result, cacheMiss)
+}
+
+func testHandleGetRequestCore(rt *testingRoundTripper, a *authImpl) {
+	// Test each valid combination at least twice to exercise
+	// both the HTTP request and cache hit paths.
+	// Exercise non-existent keys sporadically, these will return:
+	// GetUserBuckets - empty list of buckets, no error
+	// GetUserUuid - "" Uuid, ErrorNoUuid
+	// IsAllowed - false permission, no error
+	for i := 0; i < 3*rt.info.numCombos; i++ {
+		temp := i
+		perm_idx := temp % len(rt.info.permissions)
+		perm := rt.info.permissions[perm_idx]
+		temp /= len(rt.info.permissions)
+		user_idx := temp % len(rt.info.users)
+		user := rt.info.users[user_idx]
+		temp /= len(rt.info.users)
+		domain_idx := temp % len(rt.info.domains)
+		domain := rt.info.domains[domain_idx]
+
+		getRequestBuckets(rt, a, user, domain)
+		getRequestUuid(rt, a, user, domain)
+		getRequestPerm(rt, a, user, domain, perm)
+
+		if i%10 == 0 {
+			domain = "bogus"
+			getRequestBuckets(rt, a, user, domain)
+			getRequestUuid(rt, a, user, domain)
+			getRequestPerm(rt, a, user, domain, perm)
+		}
+	}
+}
+
+/*
+ * Tests GetUserUuid(), GetUserBuckets(), IsAllowed() GET requests.
+ * Requests are served from the cache unless the underlying permissions
+ * or uuid have changed (as indicated by a version mismatch).
+ * For sequential requests, it verifies that the request hits or misses
+ * the cache (cache misses are fielded by the server, setting "tripped").
+ * When multiple routines run, it only validates the returned result is
+ * correct; it doesn't confirm whether the request hit the cache/server.
+ */
+func TestGetProcessRequest(t *testing.T) {
+	rt := newTestingRT(t)
+	// tokenValue is validated in authRoundTrip.
+	rt.setTokenAuth("", "", "1234567890")
+	a := newAuth(0)
+	a.setTransport(rt)
+
+	var cache *cbauthimpl.Cache = newCache(a)
+	cache.PermissionsVersion = "abc"
+	cache.UserVersion = "def"
+	must(a.svc.UpdateDB(cache, nil))
+
+	rt.info = &GetReqTestInfo{}
+	initTestHandleGetRequestParams(rt.info)
+	testHandleGetRequestCore(rt, a)
+
+	// Modify permissions version which should invalidate cache entries
+	// for GetUserBuckets and IsAllowed
+	cache.PermissionsVersion = "def"
+	must(a.svc.UpdateDB(cache, nil))
+	rt.info.bucketsHit = make(map[ReqKey]bool)
+	rt.info.permHit = make(map[ReqKeyPerm]bool)
+	testHandleGetRequestCore(rt, a)
+
+	// Modify user version which should invalidate cache entries
+	// for GetUserUuid
+	cache.UserVersion = "abc"
+	must(a.svc.UpdateDB(cache, nil))
+	rt.info.uuidHit = make(map[ReqKey]bool)
+	testHandleGetRequestCore(rt, a)
+
+	// Before running concurrent goroutines, disable serial checks
+	// that set/read unprotected shared variables in rt
+	// Reset the versions to purge caches and encourage concurrent
+	// cache adds in addition to reads
+	rt.disableSerialChecks = true
+	cache.PermissionsVersion = "123"
+	cache.UserVersion = "456"
+	must(a.svc.UpdateDB(cache, nil))
+
+	var wg sync.WaitGroup
+	for i := 1; i <= 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			time.Sleep(1 * time.Microsecond)
+			testHandleGetRequestCore(rt, a)
+		}()
+	}
+	wg.Wait()
 }
 
 func TestUnknownHostPortErrorFormatting(t *testing.T) {

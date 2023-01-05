@@ -1,5 +1,5 @@
 // @author Couchbase <info@couchbase.com>
-// @copyright 2015-2019 Couchbase, Inc.
+// @copyright 2015-2023 Couchbase, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -343,7 +343,8 @@ func (n *cfgChangeNotifier) loop() {
 }
 
 // NOTE: Type 'tlsNotifier' will be removed when all the clients start
-//       using the new 'RegisterConfigRefreshCallback' API.
+//
+//	using the new 'RegisterConfigRefreshCallback' API.
 type tlsNotifier struct {
 	l        sync.Mutex
 	ch       chan struct{}
@@ -427,18 +428,14 @@ type Svc struct {
 	db                  *credsDB
 	staleErr            error
 	freshChan           chan struct{}
-	ulCache             *utils.Cache
-	ulCacheOnce         sync.Once
-	upCache             *utils.Cache
-	upCacheOnce         sync.Once
+	ulCache             ReqCache
+	uuidCache           ReqCache
+	userBktsCache       ReqCache
+	upCache             ReqCache
 	authCache           *utils.Cache
 	authCacheOnce       sync.Once
 	clientCertCache     *utils.Cache
 	clientCertCacheOnce sync.Once
-	uuidCacheOnce       sync.Once
-	uuidCache           *utils.Cache
-	userBktsCacheOnce   sync.Once
-	userBktsCache       *utils.Cache
 	httpClient          *http.Client
 	semaphore           semaphore
 	tlsNotifier         *tlsNotifier
@@ -745,6 +742,160 @@ func executeReqAndGetCreds(s *Svc, req *http.Request) (*CredsImpl, error) {
 	return &rv, nil
 }
 
+type ReqCache struct {
+	cache     *utils.Cache
+	cacheOnce sync.Once
+}
+
+type CacheParams struct {
+	cache *ReqCache
+	key   interface{}
+	size  int
+}
+
+type processResponse func(*http.Response) (interface{}, error)
+
+type ReqParams struct {
+	respCallback processResponse
+	url          string
+	user         string
+	domain       string
+	service      string
+	permission   string
+}
+
+func getFromServer(s *Svc, db *credsDB, params *ReqParams) (interface{}, error) {
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
+	req, err := http.NewRequest("GET", params.url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(db.specialPasswords) > 0 {
+		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
+	}
+
+	v := url.Values{}
+	v.Set("user", params.user)
+	v.Set("domain", params.domain)
+	if params.service != "" {
+		v.Set("service", params.service)
+	}
+	if params.permission != "" {
+		v.Set("permission", params.permission)
+	}
+	req.URL.RawQuery = v.Encode()
+
+	hresp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer hresp.Body.Close()
+	defer io.Copy(ioutil.Discard, hresp.Body)
+
+	val, err := params.respCallback(hresp)
+
+	return val, err
+}
+
+// GET response callback for GetUserLimits
+func processResponseUserLimits(resp *http.Response) (interface{}, error) {
+	var limits = map[string]int{}
+
+	if resp.StatusCode == 200 {
+		body, readErr := ioutil.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("Unexpected readErr %v", readErr)
+		}
+		jsonErr := json.Unmarshal(body, &limits)
+		if jsonErr != nil {
+			return nil, fmt.Errorf("Unexpected json unmarshal error %v", jsonErr)
+		}
+		return limits, nil
+	}
+
+	return nil, fmt.Errorf("Unexpected return code %v", resp.StatusCode)
+}
+
+// GET response callback for GetUserUuid
+func processResponseUuid(resp *http.Response) (interface{}, error) {
+	if resp.StatusCode == 200 {
+		body, readErr := ioutil.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("Unexpected readErr %v", readErr)
+		}
+		uuidResp := struct {
+			User, Domain, Uuid string
+		}{}
+		jsonErr := json.Unmarshal(body, &uuidResp)
+		if jsonErr != nil {
+			return nil, fmt.Errorf("Unexpected json unmarshal error %v", jsonErr)
+		}
+		if uuidResp.Uuid == "" {
+			return nil, ErrNoUuid
+		}
+		return uuidResp.Uuid, nil
+	}
+
+	return nil, fmt.Errorf("Unexpected return code %v", resp.StatusCode)
+}
+
+// GET response callback for GetUserBuckets
+func processResponseUserBuckets(resp *http.Response) (interface{}, error) {
+	var bucketAndPerms = []string{}
+
+	if resp.StatusCode == 200 {
+		body, readErr := ioutil.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("Unexpected readErr %v", readErr)
+		}
+		jsonErr := json.Unmarshal(body, &bucketAndPerms)
+		if jsonErr != nil {
+			return nil, fmt.Errorf("Unexpected json unmarshal error %v", jsonErr)
+		}
+		return bucketAndPerms, nil
+	}
+
+	return nil, fmt.Errorf("Unexpected return code %v", resp.StatusCode)
+}
+
+// GET response callback for IsAllowed
+func processResponsePermission(resp *http.Response) (interface{}, error) {
+	switch resp.StatusCode {
+	case 200:
+		return true, nil
+	case 401:
+		return false, nil
+	}
+
+	return nil, fmt.Errorf("Unexpected return code %v", resp.StatusCode)
+}
+
+// Handles GetUserBuckets, GetUserLimits, GetUserUuid, IsAllowed GET requests
+func handleGetRequest(s *Svc, db *credsDB, reqParams *ReqParams,
+	cacheParams *CacheParams) (interface{}, error) {
+	if cacheParams != nil {
+		cacheParams.cache.cacheOnce.Do(
+			func() {
+				cacheParams.cache.cache = utils.NewCache(cacheParams.size)
+			})
+
+		cachedVal, found := cacheParams.cache.cache.Get(cacheParams.key)
+		if found {
+			return cachedVal, nil
+		}
+	}
+
+	val, err := getFromServer(s, db, reqParams)
+	if err == nil && cacheParams != nil {
+		cacheParams.cache.cache.Add(cacheParams.key, val)
+	}
+
+	return val, err
+}
+
 type serviceLimits struct {
 	version string
 	user    string
@@ -763,63 +914,26 @@ func GetUserLimits(s *Svc, user, domain, service string) (map[string]int, error)
 		return limits, staleError(s)
 	}
 
-	s.ulCacheOnce.Do(func() { s.ulCache = utils.NewCache(1024) })
-
-	key := serviceLimits{db.limitsConfig.UserLimitsVersion, user, domain, service}
-
-	cachedlimits, found := s.ulCache.Get(key)
-	limits, ok := cachedlimits.(map[string]int)
-	if found && ok {
-		return limits, nil
+	reqParams := &ReqParams{
+		respCallback: processResponseUserLimits,
+		url:          db.limitsCheckURL,
+		user:         user,
+		domain:       domain,
+		service:      service,
 	}
 
-	limits, err := getUserLimitsOnServer(s, db, user, domain, service)
-	if err != nil {
-		return limits, err
-	}
-	s.ulCache.Add(key, limits)
-	return limits, nil
-}
-
-func getUserLimitsOnServer(s *Svc, db *credsDB, user, domain, service string) (map[string]int, error) {
-	s.semaphore.wait()
-	defer s.semaphore.signal()
-
-	var limits = map[string]int{}
-	req, err := http.NewRequest("GET", db.limitsCheckURL, nil)
-	if err != nil {
-		return limits, err
-	}
-	if len(db.specialPasswords) > 0 {
-		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
+	cacheParams := &CacheParams{
+		cache: &s.ulCache,
+		key:   serviceLimits{db.limitsConfig.UserLimitsVersion, user, domain, service},
+		size:  1024,
 	}
 
-	v := url.Values{}
-	v.Set("user", user)
-	v.Set("domain", domain)
-	v.Set("service", service)
-	req.URL.RawQuery = v.Encode()
-
-	hresp, err := s.httpClient.Do(req)
-	if err != nil {
-		return limits, err
+	val, err := handleGetRequest(s, db, reqParams, cacheParams)
+	if err == nil {
+		limits = val.(map[string]int)
 	}
-	defer hresp.Body.Close()
-	defer io.Copy(ioutil.Discard, hresp.Body)
 
-	switch hresp.StatusCode {
-	case 200:
-		body, readErr := ioutil.ReadAll(hresp.Body)
-		if readErr != nil {
-			return limits, fmt.Errorf("Unexpected readErr %v", readErr)
-		}
-		jsonErr := json.Unmarshal(body, &limits)
-		if jsonErr != nil {
-			return limits, fmt.Errorf("Unexpected json unmarshal error %v", jsonErr)
-		}
-		return limits, nil
-	}
-	return limits, fmt.Errorf("Unexpected return code %v", hresp.StatusCode)
+	return limits, err
 }
 
 type userUUID struct {
@@ -829,76 +943,35 @@ type userUUID struct {
 }
 
 func GetUserUuid(s *Svc, user, domain string) (string, error) {
+	uuid := ""
 	if domain != "local" {
-		return "", ErrNoUuid
+		return uuid, ErrNoUuid
 	}
 
 	db := fetchDB(s)
 	if db == nil {
-		return "", staleError(s)
+		return uuid, staleError(s)
 	}
 
-	s.uuidCacheOnce.Do(func() { s.uuidCache = utils.NewCache(256) })
-
-	key := userUUID{db.userVersion, user, domain}
-
-	cachedUuid, found := s.uuidCache.Get(key)
-	if found {
-		return cachedUuid.(string), nil
+	reqParams := &ReqParams{
+		respCallback: processResponseUuid,
+		url:          db.uuidCheckURL,
+		user:         user,
+		domain:       domain,
 	}
 
-	uuid, err := getUserUuidOnServer(s, db, user, domain)
-	if err != nil {
-		return "", err
-	}
-	s.uuidCache.Add(key, uuid)
-	return uuid, nil
-}
-
-func getUserUuidOnServer(s *Svc, db *credsDB, user, domain string) (string, error) {
-	s.semaphore.wait()
-	defer s.semaphore.signal()
-
-	req, err := http.NewRequest("GET", db.uuidCheckURL, nil)
-	if err != nil {
-		return "", err
-	}
-	if len(db.specialPasswords) > 0 {
-		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
-	}
-	v := url.Values{}
-	v.Set("user", user)
-	v.Set("domain", domain)
-	req.URL.RawQuery = v.Encode()
-
-	hresp, err := s.httpClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer hresp.Body.Close()
-	defer io.Copy(ioutil.Discard, hresp.Body)
-
-	if hresp.StatusCode != 200 {
-		err = fmt.Errorf("Expecting 200 from ns_server uuid endpoint. Got: %s", hresp.Status)
-		return "", err
+	cacheParams := &CacheParams{
+		cache: &s.uuidCache,
+		key:   userUUID{db.userVersion, user, domain},
+		size:  256,
 	}
 
-	body, readErr := ioutil.ReadAll(hresp.Body)
-	if readErr != nil {
-		return "", fmt.Errorf("Unexpected readErr %v", readErr)
-	}
-	resp := struct {
-		User, Domain, Uuid string
-	}{}
-	err = json.Unmarshal(body, &resp)
-	if err != nil {
-		return "", fmt.Errorf("Unexpected json unmarshal error %v", err)
+	val, err := handleGetRequest(s, db, reqParams, cacheParams)
+	if err == nil {
+		uuid = val.(string)
 	}
 
-	if resp.Uuid == "" {
-		return "", ErrNoUuid
-	}
-	return resp.Uuid, nil
+	return uuid, err
 }
 
 type userBuckets struct {
@@ -909,66 +982,31 @@ type userBuckets struct {
 
 func GetUserBuckets(s *Svc, user, domain string) ([]string, error) {
 	var bucketAndPerms = []string{}
+
 	db := fetchDB(s)
 	if db == nil {
 		return bucketAndPerms, staleError(s)
 	}
 
-	s.userBktsCacheOnce.Do(func() { s.userBktsCache = utils.NewCache(1024) })
-
-	key := userBuckets{db.permissionsVersion, user, domain}
-
-	cachedUserBuckets, found := s.userBktsCache.Get(key)
-	bucketAndPerms, ok := cachedUserBuckets.([]string)
-	if found && ok {
-		return bucketAndPerms, nil
+	reqParams := &ReqParams{
+		respCallback: processResponseUserBuckets,
+		url:          db.userBucketsURL,
+		user:         user,
+		domain:       domain,
 	}
 
-	bucketAndPerms, err := getUserBucketsOnServer(s, db, user, domain)
-	if err != nil {
-		return bucketAndPerms, err
+	cacheParams := &CacheParams{
+		cache: &s.userBktsCache,
+		key:   userBuckets{db.permissionsVersion, user, domain},
+		size:  1024,
 	}
-	s.userBktsCache.Add(key, bucketAndPerms)
-	return bucketAndPerms, nil
-}
 
-func getUserBucketsOnServer(s *Svc, db *credsDB, user, domain string) ([]string, error) {
-	s.semaphore.wait()
-	defer s.semaphore.signal()
+	val, err := handleGetRequest(s, db, reqParams, cacheParams)
+	if err == nil {
+		bucketAndPerms = val.([]string)
+	}
 
-	var bucketsAndPerms = []string{}
-	req, err := http.NewRequest("GET", db.userBucketsURL, nil)
-	if err != nil {
-		return bucketsAndPerms, err
-	}
-	if len(db.specialPasswords) > 0 {
-		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
-	}
-	v := url.Values{}
-	v.Set("user", user)
-	v.Set("domain", domain)
-	req.URL.RawQuery = v.Encode()
-
-	hresp, err := s.httpClient.Do(req)
-	if err != nil {
-		return bucketsAndPerms, err
-	}
-	defer hresp.Body.Close()
-	defer io.Copy(ioutil.Discard, hresp.Body)
-
-	switch hresp.StatusCode {
-	case 200:
-		body, readErr := ioutil.ReadAll(hresp.Body)
-		if readErr != nil {
-			return bucketsAndPerms, fmt.Errorf("Unexpected readErr %v", readErr)
-		}
-		jsonErr := json.Unmarshal(body, &bucketsAndPerms)
-		if jsonErr != nil {
-			return bucketsAndPerms, fmt.Errorf("Unexpected json unmarshal error %v", jsonErr)
-		}
-		return bucketsAndPerms, nil
-	}
-	return bucketsAndPerms, fmt.Errorf("Unexpected return code %v", hresp.StatusCode)
+	return bucketAndPerms, err
 }
 
 type userPermission struct {
@@ -979,63 +1017,39 @@ type userPermission struct {
 }
 
 func checkPermission(s *Svc, user, domain, permission string) (bool, error) {
+	allowed := false
+
 	db := fetchDB(s)
 	if db == nil {
-		return false, staleError(s)
+		return allowed, staleError(s)
 	}
 
-	s.upCacheOnce.Do(func() { s.upCache = utils.NewCache(1024) })
+	reqParams := &ReqParams{
+		respCallback: processResponsePermission,
+		url:          db.permissionCheckURL,
+		user:         user,
+		domain:       domain,
+		permission:   permission,
+	}
+
+	var cacheParams *CacheParams
 
 	if domain == "external" {
-		return checkPermissionOnServer(s, db, user, domain, permission)
+		cacheParams = nil
+	} else {
+		cacheParams = &CacheParams{
+			cache: &s.upCache,
+			key:   userPermission{db.permissionsVersion, user, domain, permission},
+			size:  1024,
+		}
 	}
 
-	key := userPermission{db.permissionsVersion, user, domain, permission}
-
-	allowed, found := s.upCache.Get(key)
-	if found {
-		return allowed.(bool), nil
+	val, err := handleGetRequest(s, db, reqParams, cacheParams)
+	if err == nil {
+		allowed = val.(bool)
 	}
 
-	allowedOnServer, err := checkPermissionOnServer(s, db, user, domain, permission)
-	if err != nil {
-		return false, err
-	}
-	s.upCache.Add(key, allowedOnServer)
-	return allowedOnServer, nil
-}
-
-func checkPermissionOnServer(s *Svc, db *credsDB, user, domain, permission string) (bool, error) {
-	s.semaphore.wait()
-	defer s.semaphore.signal()
-
-	req, err := http.NewRequest("GET", db.permissionCheckURL, nil)
-	if err != nil {
-		return false, err
-	}
-	if len(db.specialPasswords) > 0 {
-		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
-	}
-	v := url.Values{}
-	v.Set("user", user)
-	v.Set("domain", domain)
-	v.Set("permission", permission)
-	req.URL.RawQuery = v.Encode()
-
-	hresp, err := s.httpClient.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer hresp.Body.Close()
-	defer io.Copy(ioutil.Discard, hresp.Body)
-
-	switch hresp.StatusCode {
-	case 200:
-		return true, nil
-	case 401:
-		return false, nil
-	}
-	return false, fmt.Errorf("Unexpected return code %v", hresp.StatusCode)
+	return allowed, err
 }
 
 type userPassword struct {

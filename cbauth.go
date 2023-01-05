@@ -98,7 +98,10 @@ type Authenticator interface {
 	GetUserLimits(user, domain, service string) (map[string]int, error)
 	// GetUserUuid returns uuid for a user.
 	GetUserUuid(user, domain string) (string, error)
-	// GetUserBuckets returns buckets a user has permissions for
+	// GetUserBuckets returns buckets on which a user has any of the
+	// following permissions to:
+	// - Access documents in any collection in the bucket
+	// - Access collections metadata for any scope in the bucket
 	GetUserBuckets(user, domain string) ([]string, error)
 }
 
