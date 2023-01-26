@@ -154,16 +154,18 @@ type ServerlessManager interface {
 }
 
 type PauseParams struct {
-	ID         string `json:"id"`
-	Bucket     string `json:"bucket"`
-	RemotePath string `json:"remotePath"`
+	ID                string `json:"id"`
+	Bucket            string `json:"bucket"`
+	RemotePath        string `json:"remotePath"`
+	BlobStorageRegion string `json:"blobStorageRegion"`
 }
 
 type ResumeParams struct {
-	ID         string `json:"id"`
-	Bucket     string `json:"bucket"`
-	RemotePath string `json:"remotePath"`
-	DryRun     bool   `json:"dryRun"`
+	ID                string `json:"id"`
+	Bucket            string `json:"bucket"`
+	RemotePath        string `json:"remotePath"`
+	BlobStorageRegion string `json:"blobStorageRegion"`
+	DryRun            bool   `json:"dryRun"`
 }
 
 type HibernationManager interface {
