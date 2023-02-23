@@ -98,7 +98,7 @@ func InternalRetryDefaultInitWithService(service, mgmtHostPort, user, password s
 	serviceName := service + "-cbauth"
 	host, port, err := SplitHostPort(mgmtHostPort)
 	if err != nil {
-		return false, nil
+		return false, fmt.Errorf("Failed to split hostport `%s': %s", mgmtHostPort, err)
 	}
 	baseurl := fmt.Sprintf("http://%s:%d/%s", host, port, serviceName)
 	u, err := url.Parse(baseurl)
