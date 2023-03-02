@@ -158,6 +158,7 @@ type PauseParams struct {
 	Bucket            string `json:"bucket"`
 	RemotePath        string `json:"remotePath"`
 	BlobStorageRegion string `json:"blobStorageRegion"`
+	RateLimit         uint64 `json:"rateLimit"`
 }
 
 type ResumeParams struct {
@@ -166,6 +167,7 @@ type ResumeParams struct {
 	RemotePath        string `json:"remotePath"`
 	BlobStorageRegion string `json:"blobStorageRegion"`
 	DryRun            bool   `json:"dryRun"`
+	RateLimit         uint64 `json:"rateLimit"`
 }
 
 type HibernationManager interface {
