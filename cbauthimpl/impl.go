@@ -46,7 +46,6 @@ type TLSRefreshCallback func() error
 const (
 	CFG_CHANGE_CERTS_TLSCONFIG uint64 = 1 << iota
 	CFG_CHANGE_CLUSTER_ENCRYPTION
-	CFG_CHANGE_USER_LIMITS
 	CFG_CHANGE_CLIENT_CERTS_TLSCONFIG
 	_MAX_CFG_CHANGE_FLAGS
 )
@@ -74,13 +73,6 @@ type TLSConfig struct {
 	present                    bool
 	PrivateKeyPassphrase       []byte
 	ClientPrivateKeyPassphrase []byte
-}
-
-// LimitsConfig contains info about whether Limits needs to be enforced and what
-// the limits version is.
-type LimitsConfig struct {
-	EnforceLimits     bool
-	UserLimitsVersion string
 }
 
 // ClusterEncryptionConfig contains info about whether to use SSL ports for
@@ -164,7 +156,6 @@ type credsDB struct {
 	nodes                   []Node
 	authCheckURL            string
 	permissionCheckURL      string
-	limitsCheckURL          string
 	uuidCheckURL            string
 	userBucketsURL          string
 	specialUser             string
@@ -176,7 +167,6 @@ type credsDB struct {
 	clientCertVersion       int
 	extractUserFromCertURL  string
 	clientCertAuthVersion   string
-	limitsConfig            LimitsConfig
 	clusterEncryptionConfig ClusterEncryptionConfig
 	tlsConfig               TLSConfig
 }
@@ -186,13 +176,11 @@ type Cache struct {
 	Nodes                   []Node
 	AuthCheckURL            string `json:"authCheckUrl"`
 	PermissionCheckURL      string `json:"permissionCheckUrl"`
-	LimitsCheckURL          string
 	UuidCheckURL            string
 	UserBucketsURL          string
 	SpecialUser             string   `json:"specialUser"`
 	SpecialPasswords        []string `json:"specialPasswords"`
 	PermissionsVersion      string
-	LimitsConfig            LimitsConfig
 	UserVersion             string
 	AuthVersion             string
 	CertVersion             int
@@ -434,7 +422,6 @@ type Svc struct {
 	db                  *credsDB
 	staleErr            error
 	freshChan           chan struct{}
-	ulCache             ReqCache
 	uuidCache           ReqCache
 	userBktsCache       ReqCache
 	upCache             ReqCache
@@ -453,13 +440,11 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		nodes:                   c.Nodes,
 		authCheckURL:            c.AuthCheckURL,
 		permissionCheckURL:      c.PermissionCheckURL,
-		limitsCheckURL:          c.LimitsCheckURL,
 		uuidCheckURL:            c.UuidCheckURL,
 		userBucketsURL:          c.UserBucketsURL,
 		specialUser:             c.SpecialUser,
 		specialPasswords:        c.SpecialPasswords,
 		permissionsVersion:      c.PermissionsVersion,
-		limitsConfig:            c.LimitsConfig,
 		userVersion:             c.UserVersion,
 		authVersion:             c.AuthVersion,
 		certVersion:             c.CertVersion,
@@ -591,10 +576,6 @@ func (s *Svc) needConfigRefresh(db *credsDB) uint64 {
 
 	if s.db.clusterEncryptionConfig != db.clusterEncryptionConfig {
 		changes |= CFG_CHANGE_CLUSTER_ENCRYPTION
-	}
-
-	if s.db.limitsConfig != db.limitsConfig {
-		changes |= CFG_CHANGE_USER_LIMITS
 	}
 
 	return changes
@@ -812,25 +793,6 @@ func getFromServer(s *Svc, db *credsDB, params *ReqParams) (interface{}, error) 
 	return val, err
 }
 
-// GET response callback for GetUserLimits
-func processResponseUserLimits(resp *http.Response) (interface{}, error) {
-	var limits = map[string]int{}
-
-	if resp.StatusCode == 200 {
-		body, readErr := ioutil.ReadAll(resp.Body)
-		if readErr != nil {
-			return nil, fmt.Errorf("Unexpected readErr %v", readErr)
-		}
-		jsonErr := json.Unmarshal(body, &limits)
-		if jsonErr != nil {
-			return nil, fmt.Errorf("Unexpected json unmarshal error %v", jsonErr)
-		}
-		return limits, nil
-	}
-
-	return nil, fmt.Errorf("Unexpected return code %v", resp.StatusCode)
-}
-
 // GET response callback for GetUserUuid
 func processResponseUuid(resp *http.Response) (interface{}, error) {
 	if resp.StatusCode == 200 {
@@ -885,7 +847,7 @@ func processResponsePermission(resp *http.Response) (interface{}, error) {
 	return nil, fmt.Errorf("Unexpected return code %v", resp.StatusCode)
 }
 
-// Handles GetUserBuckets, GetUserLimits, GetUserUuid, IsAllowed GET requests
+// Handles GetUserBuckets, GetUserUuid, IsAllowed GET requests
 func handleGetRequest(s *Svc, db *credsDB, reqParams *ReqParams,
 	cacheParams *CacheParams) (interface{}, error) {
 	if cacheParams != nil {
@@ -906,46 +868,6 @@ func handleGetRequest(s *Svc, db *credsDB, reqParams *ReqParams,
 	}
 
 	return val, err
-}
-
-type serviceLimits struct {
-	version string
-	user    string
-	domain  string
-	service string
-}
-
-func GetUserLimits(s *Svc, user, domain, service string) (map[string]int, error) {
-	var limits = map[string]int{}
-	if domain != "local" {
-		return limits, nil
-	}
-
-	db := fetchDB(s)
-	if db == nil {
-		return limits, staleError(s)
-	}
-
-	reqParams := &ReqParams{
-		respCallback: processResponseUserLimits,
-		url:          db.limitsCheckURL,
-		user:         user,
-		domain:       domain,
-		service:      service,
-	}
-
-	cacheParams := &CacheParams{
-		cache: &s.ulCache,
-		key:   serviceLimits{db.limitsConfig.UserLimitsVersion, user, domain, service},
-		size:  1024,
-	}
-
-	val, err := handleGetRequest(s, db, reqParams, cacheParams)
-	if err == nil {
-		limits = val.(map[string]int)
-	}
-
-	return limits, err
 }
 
 type userUUID struct {
@@ -1156,16 +1078,6 @@ func GetClientCertAuthType(s *Svc) (tls.ClientAuthType, error) {
 	}
 
 	return db.tlsConfig.ClientAuthType, nil
-}
-
-// GetLimitsConfig returns limits settings.
-func GetLimitsConfig(s *Svc) (LimitsConfig, error) {
-	db := fetchDB(s)
-	if db == nil {
-		return LimitsConfig{}, staleError(s)
-	}
-
-	return db.limitsConfig, nil
 }
 
 // GetClusterEncryptionConfig returns if cross node communication needs to be
