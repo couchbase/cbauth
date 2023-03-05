@@ -196,6 +196,7 @@ type Cache struct {
 type CredsImpl struct {
 	name     string
 	domain   string
+	uuid     string
 	password string
 	s        *Svc
 }
@@ -217,6 +218,15 @@ func (c *CredsImpl) Domain() string {
 // User method returns user and domain for non-auditing purpose.
 func (c *CredsImpl) User() (name, domain string) {
 	return c.name, c.domain
+}
+
+// User uuid used for generating user stats, need not be present.
+// Only present for local users.
+func (c *CredsImpl) Uuid() (string, error) {
+	if c.uuid == "" {
+		return c.uuid, ErrNoUuid
+	}
+	return c.uuid, nil
 }
 
 // IsAllowed method returns true if the permission is granted
@@ -711,14 +721,14 @@ func executeReqAndGetCreds(s *Svc, req *http.Request) (*CredsImpl, error) {
 	}
 
 	resp := struct {
-		User, Domain string
+		User, Domain, Uuid string
 	}{}
 	err = json.Unmarshal(body, &resp)
 	if err != nil {
 		return nil, err
 	}
 
-	rv := CredsImpl{name: resp.User, domain: resp.Domain, s: s}
+	rv := CredsImpl{name: resp.User, domain: resp.Domain, uuid: resp.Uuid, s: s}
 	return &rv, nil
 }
 
@@ -982,9 +992,10 @@ type userPassword struct {
 	password string
 }
 
-type userIdentity struct {
+type userInfo struct {
 	user   string
 	domain string
+	uuid   string
 }
 
 // VerifyPassword verifies given user/password creds against cbauth
@@ -1010,11 +1021,12 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 
 	id, found := s.authCache.Get(key)
 	if found {
-		identity := id.(userIdentity)
+		identity := id.(userInfo)
 		return &CredsImpl{
 			name:     identity.user,
 			password: password,
 			s:        s,
+			uuid:     identity.uuid,
 			domain:   identity.domain}, nil
 	}
 
@@ -1024,7 +1036,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	}
 
 	if rv.domain == "admin" || rv.domain == "local" {
-		s.authCache.Add(key, userIdentity{rv.name, rv.domain})
+		s.authCache.Add(key, userInfo{rv.name, rv.domain, rv.uuid})
 	}
 	return rv, nil
 }
@@ -1176,14 +1188,23 @@ func MaybeGetCredsFromCert(s *Svc, tlsState *tls.ConnectionState) (*CredsImpl, e
 
 		val, found := s.clientCertCache.Get(key)
 		if found {
-			ui, _ := val.(*userIdentity)
-			creds := &CredsImpl{name: ui.user, domain: ui.domain, s: s}
+			ui, _ := val.(*userInfo)
+			creds := &CredsImpl{
+				name:   ui.user,
+				domain: ui.domain,
+				uuid:   ui.uuid,
+				s:      s,
+			}
 			return creds, nil
 		}
 
 		creds, _ := getUserIdentityFromCert(cert, db, s)
 		if creds != nil {
-			ui := &userIdentity{user: creds.name, domain: creds.domain}
+			ui := &userInfo{
+				user:   creds.name,
+				domain: creds.domain,
+				uuid:   creds.uuid,
+			}
 			s.clientCertCache.Add(key, interface{}(ui))
 			return creds, nil
 		}

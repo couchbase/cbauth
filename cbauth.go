@@ -110,6 +110,9 @@ type Creds interface {
 	Domain() string
 	// User method returns user and domain for non auditing purpose.
 	User() (name, domain string)
+	// Uuid method returns user uuid for stats.
+	// Only present for local users.
+	Uuid() (string, error)
 	// IsAllowed method returns true if the permission is granted
 	// for these credentials
 	IsAllowed(permission string) (bool, error)
