@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/couchbase/cbauth/httpreq"
 )
 
 // SplitHostPort separates hostport into string host and numeric port.
@@ -40,9 +42,8 @@ func extractBase64Pair(s string) (user, extra string, err error) {
 	return
 }
 
-// ExtractCreds extracts Basic auth creds from request.
-func ExtractCreds(req *http.Request) (user string, pwd string, err error) {
-	auth := req.Header.Get("Authorization")
+func ExtractCredsGeneric(hdr httpreq.HttpHeader) (user string, pwd string, err error) {
+	auth := hdr.Get("Authorization")
 	if auth == "" {
 		return "", "", nil
 	}
@@ -55,10 +56,21 @@ func ExtractCreds(req *http.Request) (user string, pwd string, err error) {
 	return extractBase64Pair(auth[len(basicPrefix):])
 }
 
-// ExtractOnBehalfIdentity extracts 'on behalf' identity from header.
+// TODO: Remove this when query moves to using httpreq alone
+func ExtractCreds(req *http.Request) (user string, pwd string, err error) {
+	return ExtractCredsGeneric(req.Header)
+}
+
+// TODO: Remove this when query moves to using httpreq alone
 func ExtractOnBehalfIdentity(req *http.Request) (user string,
 	domain string, err error) {
-	onBehalf := req.Header.Get("cb-on-behalf-of")
+	return ExtractOnBehalfIdentityGeneric(req.Header)
+}
+
+// ExtractOnBehalfIdentityGeneric extracts 'on behalf' identity from header.
+func ExtractOnBehalfIdentityGeneric(hdr httpreq.HttpHeader) (user string,
+	domain string, err error) {
+	onBehalf := hdr.Get("cb-on-behalf-of")
 	if onBehalf == "" {
 		return "", "", nil
 	}

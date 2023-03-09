@@ -1,5 +1,5 @@
 // @author Couchbase <info@couchbase.com>
-// @copyright 2014 Couchbase, Inc.
+// @copyright 2014-2023 Couchbase, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import (
 	"net/http"
 
 	"github.com/couchbase/cbauth/cbauthimpl"
+	"github.com/couchbase/cbauth/httpreq"
 )
 
 // TODO: consider API that would allow us to do digest auth behind the
@@ -64,6 +65,9 @@ type LimitsConfig cbauthimpl.LimitsConfig
 type Authenticator interface {
 	// AuthWebCreds method extracts credentials from given http request.
 	AuthWebCreds(req *http.Request) (creds Creds, err error)
+	// AuthWebCredsGeneric method extracts credentials from an HTTP request
+	// that is generic (not necessarily using the net/http library)
+	AuthWebCredsGeneric(req httpreq.HttpRequest) (creds Creds, err error)
 	// Auth method constructs credentials from given user and password pair.
 	Auth(user, pwd string) (creds Creds, err error)
 	// GetHTTPServiceAuth returns user/password creds giving
@@ -159,25 +163,36 @@ func (s UnknownHostPortError) Error() string {
 }
 
 func (a *authImpl) AuthWebCreds(req *http.Request) (creds Creds, err error) {
-	if cbauthimpl.IsAuthTokenPresent(req) {
-		return cbauthimpl.VerifyOnServer(a.svc, req.Header)
+	return a.AuthWebCredsCore(req.Header, req.TLS)
+}
+
+func (a *authImpl) AuthWebCredsGeneric(req httpreq.HttpRequest) (creds Creds,
+	err error) {
+	var hdr httpreq.HttpHeader = req
+	return a.AuthWebCredsCore(hdr, req.GetTLS())
+}
+
+func (a *authImpl) AuthWebCredsCore(Hdr httpreq.HttpHeader,
+	TLSState *tls.ConnectionState) (creds Creds, err error) {
+	if cbauthimpl.IsAuthTokenPresent(Hdr) {
+		return cbauthimpl.VerifyOnServer(a.svc, Hdr)
 	}
 
-	rv, err := cbauthimpl.MaybeGetCredsFromCert(a.svc, req)
+	rv, err := cbauthimpl.MaybeGetCredsFromCert(a.svc, TLSState)
 	if err != nil {
 		return nil, err
 	} else if rv != nil {
 		return rv, nil
 	}
 
-	user, pwd, err := ExtractCreds(req)
+	user, pwd, err := ExtractCredsGeneric(Hdr)
 	if err != nil {
 		return nil, err
 	}
 	if user == "" && pwd == "" {
 		return nil, fmt.Errorf("no web credentials found in request")
 	}
-	onBehalfUser, onBehalfDomain, err := ExtractOnBehalfIdentity(req)
+	onBehalfUser, onBehalfDomain, err := ExtractOnBehalfIdentityGeneric(Hdr)
 	if err != nil {
 		return nil, err
 	}

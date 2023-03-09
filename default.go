@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/couchbase/cbauth/cbauthimpl"
+	"github.com/couchbase/cbauth/httpreq"
 	"github.com/couchbase/cbauth/revrpc"
 )
 
@@ -143,6 +144,15 @@ func AuthWebCreds(req *http.Request) (creds Creds, err error) {
 		return nil, ErrNotInitialized
 	}
 	return Default.AuthWebCreds(req)
+}
+
+// AuthWebCredsGeneric method extracts credentials from an HTTP request
+// that is generic (not necessarily using the net/http library)
+func AuthWebCredsGeneric(req httpreq.HttpRequest) (creds Creds, err error) {
+	if Default == nil {
+		return nil, ErrNotInitialized
+	}
+	return Default.AuthWebCredsGeneric(req)
 }
 
 // Auth method constructs credentials from given user and password

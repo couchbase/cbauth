@@ -35,6 +35,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/couchbase/cbauth/httpreq"
 	"github.com/couchbase/cbauth/utils"
 )
 
@@ -639,11 +640,11 @@ const tokenHeader = "ns-server-ui"
 // IsAuthTokenPresent returns true iff ns_server's ui token header
 // ("ns-server-ui") is set to "yes". UI is using that header to
 // indicate that request is using so called token auth.
-func IsAuthTokenPresent(req *http.Request) bool {
-	return req.Header.Get(tokenHeader) == "yes"
+func IsAuthTokenPresent(Hdr httpreq.HttpHeader) bool {
+	return Hdr.Get(tokenHeader) == "yes"
 }
 
-func copyHeader(name string, from, to http.Header) {
+func copyHeader(name string, from httpreq.HttpHeader, to http.Header) {
 	if val := from.Get(name); val != "" {
 		to.Set(name, val)
 	}
@@ -677,7 +678,7 @@ func VerifyOnBehalf(s *Svc, user, password, onBehalfUser,
 }
 
 // VerifyOnServer authenticates http request by calling POST /_cbauth REST endpoint
-func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
+func VerifyOnServer(s *Svc, reqHeaders httpreq.HttpHeader) (*CredsImpl, error) {
 	db := fetchDB(s)
 	if db == nil {
 		return nil, staleError(s)
@@ -695,10 +696,11 @@ func VerifyOnServer(s *Svc, reqHeaders http.Header) (*CredsImpl, error) {
 		panic(err)
 	}
 
-	copyHeader(tokenHeader, reqHeaders, req.Header)
-	copyHeader("ns-server-auth-token", reqHeaders, req.Header)
-	copyHeader("Cookie", reqHeaders, req.Header)
-	copyHeader("Authorization", reqHeaders, req.Header)
+	keys := []string{tokenHeader, "ns-server-auth-token",
+		"Cookie", "Authorization"}
+	for _, key := range keys {
+		copyHeader(key, reqHeaders, req.Header)
+	}
 
 	rv, err := executeReqAndGetCreds(s, req)
 	if err != nil {
@@ -1230,14 +1232,14 @@ type clienCertHash struct {
 
 // MaybeGetCredsFromCert extracts user's credentials from certificate
 // Those returned credentials could be used for calling IsAllowed function
-func MaybeGetCredsFromCert(s *Svc, req *http.Request) (*CredsImpl, error) {
+func MaybeGetCredsFromCert(s *Svc, tlsState *tls.ConnectionState) (*CredsImpl, error) {
 	db := fetchDB(s)
 	if db == nil {
 		return nil, staleError(s)
 	}
 
 	// If TLS is nil, then do nothing as it's an http request and not https.
-	if req.TLS == nil {
+	if tlsState == nil {
 		return nil, nil
 	}
 
@@ -1248,12 +1250,12 @@ func MaybeGetCredsFromCert(s *Svc, req *http.Request) (*CredsImpl, error) {
 
 	if cAuthType == tls.NoClientCert {
 		return nil, nil
-	} else if cAuthType == tls.VerifyClientCertIfGiven && len(req.TLS.PeerCertificates) == 0 {
+	} else if cAuthType == tls.VerifyClientCertIfGiven && len(tlsState.PeerCertificates) == 0 {
 		return nil, nil
 	} else {
 		// The leaf certificate is the one which will have the username
 		// encoded into it and it's the first entry in 'PeerCertificates'.
-		cert := req.TLS.PeerCertificates[0]
+		cert := tlsState.PeerCertificates[0]
 
 		h := md5.New()
 		h.Write(cert.Raw)
