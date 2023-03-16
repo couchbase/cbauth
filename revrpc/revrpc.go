@@ -34,6 +34,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/couchbase/cbauth/utils"
 	log "github.com/couchbase/clog"
 )
 
@@ -58,6 +59,11 @@ type Service struct {
 // given Service instance is already running.
 var ErrAlreadyRunning = errors.New("service is already running")
 var ErrRevRpcUnauthorized = errors.New("invalid revrpc credentials")
+
+const uaSvcSuffix = "service"
+const uaSvcVersion = ""
+
+var userAgent = utils.MakeUserAgent(uaSvcSuffix, uaSvcVersion)
 
 // NewService creates and returns Service instance that connects to
 // given ns_server url (which is expected to have creds
@@ -164,6 +170,7 @@ func (s *RevrpcSvc) UpdateURL(urlChange URLChange, res *URLChangeResult) error {
 	rv := MustService(urlChange.NewURL)
 	req, _ := http.NewRequest("RPCCONNECT", rv.url.String()+"/test", nil)
 	req.SetBasicAuth(rv.user, rv.pwd)
+	req.Header.Set("User-Agent", userAgent)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		*res = URLChangeResult{IsSucc: false, Description: err.Error()}
@@ -208,6 +215,7 @@ func (s *Service) Run(setupBody ServiceSetupCallback) error {
 
 	req, _ := http.NewRequest("RPCCONNECT", s.url.String(), nil)
 	req.SetBasicAuth(s.user, s.pwd)
+	req.Header.Set("User-Agent", userAgent)
 	err = req.Write(conn)
 	if err != nil {
 		return err

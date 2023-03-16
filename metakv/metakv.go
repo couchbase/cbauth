@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	"github.com/couchbase/cbauth"
+	"github.com/couchbase/cbauth/utils"
 )
 
 // ErrRevMismatch error is returned from Set and Delete when there is
@@ -64,6 +65,11 @@ type store struct {
 	url    *url.URL
 	client *http.Client
 }
+
+const uaMetaKvSuffix = "metakv"
+const uaMetaKvVersion = ""
+
+var userAgent = utils.MakeUserAgent(uaMetaKvSuffix, uaMetaKvVersion)
 
 var defaultStore = initDefaultStore()
 
@@ -99,6 +105,9 @@ func doCallInner(s *store, method, path string, values url.Values) (resp *http.R
 	if method != "PUT" && values != nil {
 		req.URL.RawQuery = values.Encode()
 	}
+
+	req.Header.Set("User-Agent", userAgent)
+
 	r, err := s.client.Do(req)
 	if err != nil {
 		return r, err

@@ -26,7 +26,9 @@ import (
 	"strings"
 
 	"errors"
+
 	"github.com/couchbase/cbauth"
+	"github.com/couchbase/cbauth/utils"
 	log "github.com/couchbase/clog"
 )
 
@@ -34,6 +36,11 @@ var mgmtURLFlag string
 var listenFlag string
 var useFullerRequestFlag bool
 var authFlag string
+
+const uaCbauthEgSuffix = "cbauth"
+const uaCbauthEgVersion = ""
+
+var userAgent = utils.MakeUserAgent(uaCbauthEgSuffix, uaCbauthEgVersion)
 
 func initFlags() {
 	flag.StringVar(&mgmtURLFlag, "mgmtURL", "", "base url of mgmt service (e.g. http://lh:8091/)")
@@ -76,6 +83,8 @@ func doBucketRequestFuller(bucket, baseURL string) (json []byte, err error) {
 	if err != nil {
 		return
 	}
+
+	req.Header.Set("User-Agent", userAgent)
 
 	log.Printf("Sending request to %s. auth: %s", req.URL, req.Header.Get("Authorization"))
 

@@ -115,6 +115,11 @@ var ErrCallbackAlreadyRegistered = errors.New("Certificate refresh callback is a
 // ErrUserNotFound is used to signal when username can't be extracted from client certificate.
 var ErrUserNotFound = errors.New("Username not found")
 
+const uaCbauthSuffix = "cbauth"
+const uaCbauthVersion = ""
+
+var userAgent = utils.MakeUserAgent(uaCbauthSuffix, uaCbauthVersion)
+
 // Node struct is used as part of Cache messages to describe creds and
 // ports of some cluster node.
 type Node struct {
@@ -702,6 +707,8 @@ func VerifyOnServer(s *Svc, reqHeaders httpreq.HttpHeader) (*CredsImpl, error) {
 		copyHeader(key, reqHeaders, req.Header)
 	}
 
+	req.Header.Set("User-Agent", userAgent)
+
 	rv, err := executeReqAndGetCreds(s, req)
 	if err != nil {
 		return nil, err
@@ -774,6 +781,9 @@ func getFromServer(s *Svc, db *credsDB, params *ReqParams) (interface{}, error) 
 	if err != nil {
 		return nil, err
 	}
+
+	req.Header.Set("User-Agent", userAgent)
+
 	if len(db.specialPasswords) > 0 {
 		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
 	}
@@ -1307,6 +1317,9 @@ func getUserIdentityFromCert(cert *x509.Certificate, db *credsDB, s *Svc) (*Cred
 	if len(db.specialPasswords) > 0 {
 		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
 	}
+
+	req.Header.Set("User-Agent", userAgent)
+
 	rv, err := executeReqAndGetCreds(s, req)
 	if err != nil {
 		return nil, err
