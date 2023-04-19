@@ -77,3 +77,76 @@ func (c *Cache) Add(key interface{}, value interface{}) bool {
 
 	return true
 }
+
+// UpdateSize updates the cache size. This function takes care of fragmentation
+// in keys after the update is done. Returns true if the cache size is updated
+// otherwise it returns false.
+func (c *Cache) UpdateSize(newMaxSize int) bool {
+	if newMaxSize == c.maxSize || newMaxSize < 1 {
+		return false
+	}
+	c.Lock()
+	defer c.Unlock()
+	updateSizeLocked(c, newMaxSize)
+
+	return true
+}
+
+func updateSizeLocked(c *Cache, newMaxSize int) {
+	if newMaxSize > c.maxSize {
+		increaseCacheSize(c, newMaxSize)
+	} else {
+		decreaseCacheSize(c, newMaxSize)
+	}
+}
+
+func increaseCacheSize(c *Cache, newMaxSize int) {
+	newKeysTemp := make([]interface{}, newMaxSize)
+	if c.size < c.maxSize { // not rotated
+		copy(newKeysTemp, c.keys)
+	} else {
+		copySegmented(newKeysTemp, c, c.nextKey)
+	}
+	c.keys = newKeysTemp
+	c.nextKey = c.size
+	c.maxSize = newMaxSize
+}
+
+func decreaseCacheSize(c *Cache, newMaxSize int) {
+	newKeysTemp := make([]interface{}, newMaxSize)
+	if c.size < c.maxSize { // not rotated
+		currentStart, _ := deleteItems(c, 0, newMaxSize)
+		copy(newKeysTemp, c.keys[currentStart:c.nextKey])
+	} else { // rotated
+		currentStart, deletionRotated := deleteItems(c, c.nextKey, newMaxSize)
+		if deletionRotated {
+			copy(newKeysTemp, c.keys[currentStart:c.nextKey])
+		} else {
+			copySegmented(newKeysTemp, c, currentStart)
+		}
+	}
+	c.keys = newKeysTemp
+	c.nextKey = c.size % newMaxSize
+	c.maxSize = newMaxSize
+}
+
+func copySegmented(dest []interface{}, c *Cache, segRightStart int) {
+	rightSegItmCnt := copy(dest, c.keys[segRightStart:])
+	tail := dest[rightSegItmCnt:]
+	copy(tail, c.keys[:c.nextKey])
+}
+
+func deleteItems(c *Cache, delStart int, desiredSize int) (int, bool) {
+	deletionRotated := false
+	curr := delStart
+	for c.size > desiredSize {
+		victim := c.keys[curr]
+		c.items.Delete(victim)
+		curr = (curr + 1) % c.maxSize
+		if curr == 0 {
+			deletionRotated = true
+		}
+		c.size--
+	}
+	return curr, deletionRotated
+}

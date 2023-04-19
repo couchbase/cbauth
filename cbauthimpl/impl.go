@@ -93,6 +93,14 @@ type tlsConfigImport struct {
 	ClientPrivateKeyPassphrase []byte
 }
 
+type CacheConfig struct {
+	UuidCacheSize       int `json:"uuidCacheSize"`
+	UserBktsCacheSize   int `json:"userBktsCacheSize"`
+	UpCacheSize         int `json:"upCacheSize"`
+	AuthCacheSize       int `json:"authCacheSize"`
+	ClientCertCacheSize int `json:"clientCertCacheSize"`
+}
+
 // ErrNoAuth is an error that is returned when the user credentials
 // are not recognized
 var ErrNoAuth = errors.New("Authentication failure")
@@ -171,6 +179,7 @@ type credsDB struct {
 	clusterEncryptionConfig ClusterEncryptionConfig
 	tlsConfig               TLSConfig
 	lastHeard               time.Time
+	cacheConfig             CacheConfig
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
@@ -192,6 +201,7 @@ type Cache struct {
 	ClientCertAuthVersion   string                  `json:"clientCertAuthVersion"`
 	ClusterEncryptionConfig ClusterEncryptionConfig `json:"clusterEncryptionConfig"`
 	TLSConfig               tlsConfigImport         `json:"tlsConfig"`
+	CacheConfig             CacheConfig             `json:"cacheConfig"`
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled if
@@ -448,6 +458,15 @@ type Svc struct {
 	heartbeatWait       int
 }
 
+// Cache sizes should come from ns_server. But in case they are not, we need to
+// have some defaults for them.
+const defaultUuidCacheSize = 256
+const defaultUserBktsCacheSize = 1024
+const defaultUpCacheSize = 1024
+const defaultAuthCacheSize = 256
+const defaultClientCertCacheSize = 256
+const defaultUlCacheSize = 1024
+
 func cacheToCredsDB(c *Cache) (db *credsDB) {
 	db = &credsDB{
 		nodes:                   c.Nodes,
@@ -466,6 +485,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		clientCertAuthVersion:   c.ClientCertAuthVersion,
 		clusterEncryptionConfig: c.ClusterEncryptionConfig,
 		tlsConfig:               importTLSConfig(&c.TLSConfig, c.ClientCertAuthState),
+		cacheConfig:             c.CacheConfig,
 	}
 	return
 }
@@ -524,6 +544,29 @@ func (s *Svc) Heartbeat(Void, outparam *Void) error {
 	return nil
 }
 
+func updateCacheSize(s *Svc, db *credsDB) {
+	if s.db == nil {
+		return
+	}
+	if s.db.cacheConfig != db.cacheConfig {
+		if s.uuidCache.cache != nil {
+			s.uuidCache.cache.UpdateSize(db.cacheConfig.UuidCacheSize)
+		}
+		if s.userBktsCache.cache != nil {
+			s.userBktsCache.cache.UpdateSize(db.cacheConfig.UserBktsCacheSize)
+		}
+		if s.upCache.cache != nil {
+			s.upCache.cache.UpdateSize(db.cacheConfig.UpCacheSize)
+		}
+		if s.authCache != nil {
+			s.authCache.UpdateSize(db.cacheConfig.AuthCacheSize)
+		}
+		if s.clientCertCache != nil {
+			s.clientCertCache.UpdateSize(db.cacheConfig.ClientCertCacheSize)
+		}
+	}
+}
+
 // UpdateDB is a revrpc method that is used by ns_server update cbauth
 // state.
 func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
@@ -534,6 +577,7 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 	db := cacheToCredsDB(c)
 	s.l.Lock()
 	cfgChanges := s.needConfigRefresh(db)
+	updateCacheSize(s, db)
 	updateDBLocked(s, db)
 	s.l.Unlock()
 	if cfgChanges != 0 {
@@ -985,10 +1029,15 @@ func GetUserUuid(s *Svc, user, domain string) (string, error) {
 		domain:       domain,
 	}
 
+	cacheSize := db.cacheConfig.UuidCacheSize
+	if cacheSize == 0 {
+		cacheSize = defaultUuidCacheSize
+	}
+
 	cacheParams := &CacheParams{
 		cache: &s.uuidCache,
 		key:   userUUID{db.userVersion, user, domain},
-		size:  256,
+		size:  cacheSize,
 	}
 
 	val, err := handleGetRequest(s, db, reqParams, cacheParams)
@@ -1020,10 +1069,15 @@ func GetUserBuckets(s *Svc, user, domain string) ([]string, error) {
 		domain:       domain,
 	}
 
+	cacheSize := db.cacheConfig.UserBktsCacheSize
+	if cacheSize == 0 {
+		cacheSize = defaultUserBktsCacheSize
+	}
+
 	cacheParams := &CacheParams{
 		cache: &s.userBktsCache,
 		key:   userBuckets{db.permissionsVersion, user, domain},
-		size:  1024,
+		size:  cacheSize,
 	}
 
 	val, err := handleGetRequest(s, db, reqParams, cacheParams)
@@ -1062,10 +1116,15 @@ func checkPermission(s *Svc, user, domain, permission string) (bool, error) {
 	if domain == "external" {
 		cacheParams = nil
 	} else {
+		cacheSize := db.cacheConfig.UpCacheSize
+		if cacheSize == 0 {
+			cacheSize = defaultUpCacheSize
+		}
+
 		cacheParams = &CacheParams{
 			cache: &s.upCache,
 			key:   userPermission{db.permissionsVersion, user, domain, permission},
-			size:  1024,
+			size:  cacheSize,
 		}
 	}
 
@@ -1105,7 +1164,12 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 			domain:   "admin"}, nil
 	}
 
-	s.authCacheOnce.Do(func() { s.authCache = utils.NewCache(256) })
+	cacheSize := db.cacheConfig.AuthCacheSize
+	if cacheSize == 0 {
+		cacheSize = defaultAuthCacheSize
+	}
+
+	s.authCacheOnce.Do(func() { s.authCache = utils.NewCache(cacheSize) })
 
 	key := userPassword{db.authVersion, user, password}
 
@@ -1254,8 +1318,13 @@ func MaybeGetCredsFromCert(s *Svc, tlsState *tls.ConnectionState) (*CredsImpl, e
 		return nil, nil
 	}
 
+	cacheSize := db.cacheConfig.ClientCertCacheSize
+	if cacheSize == 0 {
+		cacheSize = defaultClientCertCacheSize
+	}
+
 	s.clientCertCacheOnce.Do(func() {
-		s.clientCertCache = utils.NewCache(256)
+		s.clientCertCache = utils.NewCache(cacheSize)
 	})
 	cAuthType := db.tlsConfig.ClientAuthType
 
