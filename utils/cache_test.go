@@ -511,3 +511,53 @@ func checkCacheProperties(t *testing.T, c *Cache,
 			orgMaxSize, expMaxSize, expMaxSize, len(c.keys))
 	}
 }
+
+func TestCacheStats(t *testing.T) {
+	c := NewCache(cacheSize)
+
+	for i := 0; i < cacheSize; i++ {
+		ok := c.Add(i, i+13)
+		if !ok {
+			t.Fatalf("key %d is already in the cache", i)
+		}
+	}
+
+	for i := 0; i < cacheSize; i++ {
+		_, ok := c.Get(i)
+		if !ok {
+			t.Fatalf("key %d not found in cache", i)
+		}
+	}
+
+	for i := cacheSize; i < cacheSize*2; i++ {
+		_, ok := c.Get(i)
+		if ok {
+			t.Fatalf("key %d should not be found in cache", i)
+		}
+	}
+
+	maxSize, size, hitCnt, missCnt := c.GetStats()
+	if maxSize != cacheSize {
+		t.Fatalf(`wrong stats received. `+
+			`Expected maxSize: %d, actual maxSize: %d`,
+			maxSize, cacheSize)
+	}
+
+	if size != cacheSize {
+		t.Fatalf(`wrong stats received. `+
+			`Expected size: %d, actual size: %d`,
+			size, cacheSize)
+	}
+
+	if hitCnt != cacheSize {
+		t.Fatalf(`wrong stats received. `+
+			`Expected hitCnt: %d, actual hitCnt: %d`,
+			hitCnt, cacheSize)
+	}
+
+	if missCnt != cacheSize {
+		t.Fatalf(`wrong stats received. `+
+			`Expected missCnt: %d, actual missCnt: %d`,
+			missCnt, cacheSize)
+	}
+}

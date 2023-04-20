@@ -17,6 +17,7 @@ package utils
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 // Cache implements simple cache optimized for concurrent reads. Items are
@@ -36,6 +37,9 @@ type Cache struct {
 
 	size    int
 	maxSize int
+
+	hitCnt  uint64
+	missCnt uint64
 }
 
 // NewCache creates new Cache
@@ -46,12 +50,21 @@ func NewCache(maxSize int) *Cache {
 		nextKey: 0,
 		size:    0,
 		maxSize: maxSize,
+		hitCnt:  0,
+		missCnt: 0,
 	}
 }
 
-// Get gets the value by key, returns (nil, false) if the value is not found
+// Get gets the value by key, returns (nil, false) if the value is not found.
+// It also updates Hit/Miss counts
 func (c *Cache) Get(key interface{}) (interface{}, bool) {
-	return c.items.Load(key)
+	v, found := c.items.Load(key)
+	if found {
+		atomic.AddUint64(&c.hitCnt, 1)
+	} else {
+		atomic.AddUint64(&c.missCnt, 1)
+	}
+	return v, found
 }
 
 // Add adds a key/value mapping to the cache if it doesn't already
@@ -149,4 +162,9 @@ func deleteItems(c *Cache, delStart int, desiredSize int) (int, bool) {
 		c.size--
 	}
 	return curr, deletionRotated
+}
+
+// GetHitMiss returns Hit/Miss counts
+func (c *Cache) GetStats() (int, int, uint64, uint64) {
+	return c.maxSize, c.size, c.hitCnt, c.missCnt
 }

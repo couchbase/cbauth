@@ -228,6 +228,14 @@ type CredsImpl struct {
 	s        *Svc
 }
 
+type CacheStats struct {
+	Name    string `json:"name"`
+	MaxSize int    `json:"maxSize"`
+	Size    int    `json:"size"`
+	Hit     uint64 `json:"hit"`
+	Miss    uint64 `json:"miss"`
+}
+
 // Name method returns user name (e.g. for auditing)
 func (c *CredsImpl) Name() string {
 	return c.name
@@ -584,6 +592,38 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 		s.tlsNotifier.notifyTLSChange()
 		s.cfgChangeNotifier.notifyCfgChange(cfgChanges)
 	}
+	return nil
+}
+
+type CachesStats struct {
+	CacheStats []CacheStats `json:"cacheStats"`
+}
+
+func (s *Svc) GetStats(Void, outparam *CachesStats) error {
+
+	if outparam == nil {
+		return nil
+	}
+
+	cacheStats := []CacheStats{}
+
+	stats := getCacheStats("uuid_cache", s.uuidCache.cache)
+	cacheStats = append(cacheStats, *stats)
+
+	stats = getCacheStats("user_bkts_cache", s.userBktsCache.cache)
+	cacheStats = append(cacheStats, *stats)
+
+	stats = getCacheStats("up_cache", s.upCache.cache)
+	cacheStats = append(cacheStats, *stats)
+
+	stats = getCacheStats("auth_cache", s.authCache)
+	cacheStats = append(cacheStats, *stats)
+
+	stats = getCacheStats("client_cert_cache", s.clientCertCache)
+	cacheStats = append(cacheStats, *stats)
+
+	(*outparam).CacheStats = cacheStats
+
 	return nil
 }
 
@@ -1396,4 +1436,23 @@ func GetNodeUuid(s *Svc) (string, error) {
 		return "", staleError(s)
 	}
 	return db.nodeUUID, nil
+}
+
+func getCacheStats(cname string, c *utils.Cache) (stats *CacheStats) {
+	maxSize, size := 0, 0
+	hit, miss := uint64(0), uint64(0)
+
+	if c != nil {
+		maxSize, size, hit, miss = c.GetStats()
+	}
+
+	stats = &CacheStats{
+		Name:    cname,
+		MaxSize: maxSize,
+		Size:    size,
+		Hit:     hit,
+		Miss:    miss,
+	}
+
+	return
 }
