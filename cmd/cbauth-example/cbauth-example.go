@@ -151,7 +151,7 @@ func authAndPerformBucketRequest(w http.ResponseWriter, req *http.Request, bucke
 
 	if err == cbauth.ErrNoAuth {
 		cbauth.SendUnauthorized(w)
-		return
+		return nil
 	}
 
 	if err != nil {
@@ -168,7 +168,7 @@ func authAndPerformBucketRequest(w http.ResponseWriter, req *http.Request, bucke
 	}
 	if !canAccess {
 		cbauth.SendForbidden(w, permission)
-		return
+		return nil
 	}
 
 	payload, err := performBucketRequest(bucket, baseURL)
