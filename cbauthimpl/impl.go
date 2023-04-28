@@ -327,7 +327,8 @@ func (n *cfgChangeNotifier) loop() {
 }
 
 // NOTE: Type 'tlsNotifier' will be removed when all the clients start
-//       using the new 'RegisterConfigRefreshCallback' API.
+//
+//	using the new 'RegisterConfigRefreshCallback' API.
 type tlsNotifier struct {
 	l        sync.Mutex
 	ch       chan struct{}
