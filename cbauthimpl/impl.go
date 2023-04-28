@@ -190,6 +190,18 @@ type Cache struct {
 	TLSConfig               tlsConfigImport         `json:"tlsConfig"`
 }
 
+// Cache is a structure into which the revrpc json is unmarshalled if
+// used from external service
+type CacheExt struct {
+	AuthCheckEndpoint           string
+	AuthVersion                 string
+	PermissionCheckEndpoint     string
+	PermissionsVersion          string
+	ExtractUserFromCertEndpoint string
+	ClientCertAuthVersion       string
+	ClientCertAuthState         string
+}
+
 // CredsImpl implements cbauth.Creds interface.
 type CredsImpl struct {
 	name     string
@@ -426,6 +438,9 @@ type Svc struct {
 	semaphore           semaphore
 	tlsNotifier         *tlsNotifier
 	cfgChangeNotifier   *cfgChangeNotifier
+	hostport            string
+	user                string
+	password            string
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -455,12 +470,44 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 	return
 }
 
+func (s *Svc) cacheToCredsDBExt(c *CacheExt) (db *credsDB) {
+	tlsConfig := TLSConfig{
+		ClientAuthType: getAuthType(c.ClientCertAuthState),
+	}
+	db = &credsDB{
+		authCheckURL:       s.buildUrl(c.AuthCheckEndpoint),
+		permissionCheckURL: s.buildUrl(c.PermissionCheckEndpoint),
+		permissionsVersion: c.PermissionsVersion,
+		authVersion:        c.AuthVersion,
+		extractUserFromCertURL: s.buildUrl(
+			c.ExtractUserFromCertEndpoint),
+		clientCertAuthVersion: c.ClientCertAuthVersion,
+		specialUser:           s.user,
+		specialPassword:       s.password,
+		tlsConfig:             tlsConfig,
+	}
+	return
+}
+
 func updateDBLocked(s *Svc, db *credsDB) {
 	s.db = db
 	if s.freshChan != nil {
 		close(s.freshChan)
 		s.freshChan = nil
 	}
+}
+
+// UpdateDBExt is a revrpc method that is used by ns_server update external
+// cbauth state.
+func (s *Svc) UpdateDBExt(c *CacheExt, outparam *bool) error {
+	if outparam != nil {
+		*outparam = true
+	}
+	db := s.cacheToCredsDBExt(c)
+	s.l.Lock()
+	updateDBLocked(s, db)
+	s.l.Unlock()
+	return nil
 }
 
 // UpdateDB is a revrpc method that is used by ns_server update cbauth
@@ -556,6 +603,16 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 // SetTransport allows to change RoundTripper for Svc
 func SetTransport(s *Svc, rt http.RoundTripper) {
 	s.httpClient = &http.Client{Transport: rt}
+}
+
+func (s *Svc) SetConnectInfo(hostport, user, password string) {
+	s.hostport = hostport
+	s.user = user
+	s.password = password
+}
+
+func (s *Svc) buildUrl(uri string) string {
+	return "http://" + s.hostport + uri
 }
 
 func (s *Svc) needConfigRefresh(db *credsDB) uint64 {

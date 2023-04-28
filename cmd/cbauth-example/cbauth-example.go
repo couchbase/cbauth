@@ -34,11 +34,14 @@ var mgmtURLFlag string
 var listenFlag string
 var useFullerRequestFlag bool
 var authFlag string
+var externalFlag bool
 
 func initFlags() {
 	flag.StringVar(&mgmtURLFlag, "mgmtURL", "", "base url of mgmt service (e.g. http://lh:8091/)")
 	flag.StringVar(&listenFlag, "listen", "", "listen endpoint (e.g. :8080)")
 	flag.BoolVar(&useFullerRequestFlag, "use-fuller-request", false, "")
+	flag.BoolVar(&externalFlag, "external", false,
+		"test cbauth for external clients")
 	flag.StringVar(&authFlag, "auth", "", "user:password to use to initialize cbauth")
 	flag.Parse()
 }
@@ -171,6 +174,10 @@ func authAndPerformBucketRequest(w http.ResponseWriter, req *http.Request, bucke
 		return nil
 	}
 
+	if externalFlag {
+		return
+	}
+
 	payload, err := performBucketRequest(bucket, baseURL)
 	if err != nil {
 		return
@@ -246,7 +253,12 @@ func maybeReinitCBAuth() {
 	if err != nil {
 		log.Fatal("Failed to parse mgmtURLFlag: ", err)
 	}
-	_, err = cbauth.InternalRetryDefaultInit(u.Host, authU, authP)
+	if externalFlag {
+		_, err = cbauth.InitExternal(
+			"external-tool", u.Host, authU, authP)
+	} else {
+		_, err = cbauth.InternalRetryDefaultInit(u.Host, authU, authP)
+	}
 	if err != nil {
 		log.Fatal("Failed to initialize cbauth: ", err)
 	}

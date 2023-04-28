@@ -59,8 +59,7 @@ func runRPCForSvc(rpcsvc *revrpc.Service, svc *cbauthimpl.Svc) error {
 	}, rpcsvc, revrpc.FnBabysitErrorPolicy(cbauthPolicy))
 }
 
-func startDefault(rpcsvc *revrpc.Service) {
-	svc := cbauthimpl.NewSVC(waitBeforeStale, &DBStaleError{})
+func startDefault(rpcsvc *revrpc.Service, svc *cbauthimpl.Svc) {
 	Default = &authImpl{svc}
 	go func() {
 		panic(runRPCForSvc(rpcsvc, svc))
@@ -73,7 +72,19 @@ func init() {
 		ErrNotInitialized = fmt.Errorf("Unable to initialize cbauth's revrpc: %s", err)
 		return
 	}
-	startDefault(rpcsvc)
+	startDefault(rpcsvc, newSvc())
+}
+
+func newSvc() *cbauthimpl.Svc {
+	return cbauthimpl.NewSVC(waitBeforeStale, &DBStaleError{})
+}
+
+// InitExternal should be used by external cbauth client to enable cbauth
+// with limited functionality. Returns false if Default Authenticator was
+// already initialized.
+func InitExternal(service, mgmtHostPort, user, password string) (bool, error) {
+	return doInternalRetryDefaultInitWithService(service,
+		mgmtHostPort, user, password, true)
 }
 
 // InternalRetryDefaultInit can be used by golang services that are
@@ -92,22 +103,36 @@ func InternalRetryDefaultInit(mgmtHostPort, user, password string) (bool, error)
 // really needed. Returns false if Default Authenticator was already
 // initialized.
 func InternalRetryDefaultInitWithService(service, mgmtHostPort, user, password string) (bool, error) {
+	return doInternalRetryDefaultInitWithService(
+		service+"-cbauth", mgmtHostPort, user, password, false)
+}
+
+func doInternalRetryDefaultInitWithService(service, mgmtHostPort, user,
+	password string, external bool) (bool, error) {
 	if Default != nil {
 		return false, nil
 	}
-	serviceName := service + "-cbauth"
 	host, port, err := SplitHostPort(mgmtHostPort)
 	if err != nil {
 		return false, nil
 	}
-	baseurl := fmt.Sprintf("http://%s:%d/%s", host, port, serviceName)
+	var baseurl string
+	if external {
+		baseurl = fmt.Sprintf("http://%s:%d/auth/v1/%s",
+			host, port, service)
+	} else {
+		baseurl = fmt.Sprintf("http://%s:%d/%s", host, port, service)
+	}
 	u, err := url.Parse(baseurl)
 	if err != nil {
 		return false, fmt.Errorf("Failed to parse constructed url `%s': %s", baseurl, err)
 	}
 	u.User = url.UserPassword(user, password)
 
-	startDefault(revrpc.MustService(u.String()))
+	svc := newSvc()
+	svc.SetConnectInfo(mgmtHostPort, user, password)
+
+	startDefault(revrpc.MustService(u.String()), svc)
 
 	return true, nil
 }
