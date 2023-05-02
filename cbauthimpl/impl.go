@@ -152,6 +152,7 @@ func getMemcachedCreds(n Node, host string, port int) (user, password string) {
 }
 
 type credsDB struct {
+	nodeUUID                string
 	nodes                   []Node
 	authCheckURL            string
 	permissionCheckURL      string
@@ -200,6 +201,7 @@ type CacheExt struct {
 	ExtractUserFromCertEndpoint string
 	ClientCertAuthVersion       string
 	ClientCertAuthState         string
+	NodeUUID                    string
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -485,6 +487,7 @@ func (s *Svc) cacheToCredsDBExt(c *CacheExt) (db *credsDB) {
 		specialUser:           s.user,
 		specialPassword:       s.password,
 		tlsConfig:             tlsConfig,
+		nodeUUID:              c.NodeUUID,
 	}
 	return
 }
@@ -1243,4 +1246,13 @@ func getUserIdentityFromCert(cert *x509.Certificate, db *credsDB, s *Svc) (*Cred
 	}
 
 	return rv, nil
+}
+
+// GetNodeUuid returns UUID of the node cbauth is currently connecting to
+func GetNodeUuid(s *Svc) (string, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return "", staleError(s)
+	}
+	return db.nodeUUID, nil
 }

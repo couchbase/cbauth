@@ -72,6 +72,8 @@ type BaseAuthenticator interface {
 // only incoming auth.
 type ExternalAuthenticator interface {
 	BaseAuthenticator
+	// GetNodeUuid returns UUID of the node cbauth is currently connecting to
+	GetNodeUuid() (string, error)
 }
 
 // Authenticator is main cbauth interface. It supports both incoming
@@ -259,6 +261,10 @@ func (a *authImpl) GetUserLimits(user, domain, service string) (map[string]int, 
 func (a *authImpl) GetUserUuid(user, domain string) (string, error) {
 	uuid, err := cbauthimpl.GetUserUuid(a.svc, user, domain)
 	return uuid, err
+}
+
+func (a *authImpl) GetNodeUuid() (string, error) {
+	return cbauthimpl.GetNodeUuid(a.svc)
 }
 
 var _ Authenticator = (*authImpl)(nil)
