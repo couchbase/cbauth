@@ -323,7 +323,7 @@ func TestStaleErrorFormatting(t *testing.T) {
 		tmpDef := oldDef
 		tmpDef.RestartsToExit = 1
 		revrpc.DefaultBabysitErrorPolicy = tmpDef
-		runRPCForSvc(rpcsvc, a.svc)
+		runRPCForSvc(rpcsvc, a.svc, getCbauthErrorPolicy(a.svc, false))
 		wg.Done()
 	}()
 

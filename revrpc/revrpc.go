@@ -48,10 +48,13 @@ type serviceImpl interface {
 
 // Service type represents specific configured instance of revrpc.
 type Service struct {
+	l       sync.Mutex
 	running int32
 	user    string
 	pwd     string
 	url     *url.URL
+	codec   *jsonServerCodec
+	stopped bool
 }
 
 // ErrAlreadyRunning is returned from Run method to indicate that
@@ -77,9 +80,10 @@ func NewService(connectURL string) (*Service, error) {
 	}
 
 	return &Service{
-		user: user,
-		pwd:  pwd,
-		url:  u,
+		user:    user,
+		pwd:     pwd,
+		url:     u,
+		stopped: false,
 	}, nil
 }
 
@@ -158,6 +162,13 @@ func (s *Service) Run(setupBody ServiceSetupCallback) error {
 		atomic.StoreInt32(&s.running, 0)
 	}()
 
+	s.l.Lock()
+	if s.stopped {
+		s.l.Unlock()
+		return io.EOF
+	}
+	s.l.Unlock()
+
 	conn, err := net.Dial("tcp", s.url.Host)
 	if err != nil {
 		return err
@@ -189,9 +200,35 @@ func (s *Service) Run(setupBody ServiceSetupCallback) error {
 	}
 
 	codec := newJsonServerCodec(rwc)
+
+	s.l.Lock()
+	if s.stopped {
+		codec.Close()
+		s.l.Unlock()
+		return io.EOF
+	}
+	s.codec = codec
+	s.l.Unlock()
+
 	rpcServer.ServeCodec(codec)
 
 	return io.EOF
+}
+
+func (s *Service) Disconnect() error {
+	s.l.Lock()
+	defer s.l.Unlock()
+	if s.codec == nil {
+		s.stopped = true
+		return nil
+	}
+	err := s.codec.Close()
+	if err != nil {
+		return err
+	}
+	s.codec = nil
+	s.stopped = true
+	return nil
 }
 
 // ErrorPolicyFn function is used to make error handling decision in
