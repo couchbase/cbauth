@@ -59,15 +59,25 @@ type ClusterEncryptionConfig cbauthimpl.ClusterEncryptionConfig
 // LimitsConfig contains info about limits settings.
 type LimitsConfig cbauthimpl.LimitsConfig
 
-// Authenticator is main cbauth interface. It supports both incoming
-// and outgoing auth.
-type Authenticator interface {
+type BaseAuthenticator interface {
 	// AuthWebCreds method extracts credentials from given http request.
 	AuthWebCreds(req *http.Request) (creds Creds, err error)
 	// Auth method constructs credentials from given user and password pair.
 	Auth(user, pwd string) (creds Creds, err error)
 	// GetHTTPServiceAuth returns user/password creds giving
 	// "admin" access to given http service inside couchbase cluster.
+}
+
+// ExternalAuthenticator is cbauth interface for external clients. It supports
+// only incoming auth.
+type ExternalAuthenticator interface {
+	BaseAuthenticator
+}
+
+// Authenticator is main cbauth interface. It supports both incoming
+// and outgoing auth.
+type Authenticator interface {
+	BaseAuthenticator
 	GetHTTPServiceAuth(hostport string) (user, pwd string, err error)
 	// GetMemcachedServiceAuth returns user/password creds given
 	// "admin" access to given memcached service.

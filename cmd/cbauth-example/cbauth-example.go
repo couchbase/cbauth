@@ -150,7 +150,12 @@ func recogniseBucket(req *http.Request) (bucket string) {
 }
 
 func authAndPerformBucketRequest(w http.ResponseWriter, req *http.Request, bucket, baseURL string) (err error) {
-	creds, err := cbauth.AuthWebCreds(req)
+	var creds cbauth.Creds
+	if externalFlag {
+		creds, err = cbauth.GetExternalAuthenticator().AuthWebCreds(req)
+	} else {
+		creds, err = cbauth.AuthWebCreds(req)
+	}
 
 	if err == cbauth.ErrNoAuth {
 		cbauth.SendUnauthorized(w)

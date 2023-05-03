@@ -35,6 +35,7 @@ import (
 // ns_server. It is nil if your process was not (correctly) spawned by
 // ns_server.
 var Default Authenticator
+var defaultExt ExternalAuthenticator
 
 var errDisconnected = errors.New("revrpc connection to ns_server was closed")
 
@@ -60,7 +61,9 @@ func runRPCForSvc(rpcsvc *revrpc.Service, svc *cbauthimpl.Svc) error {
 }
 
 func startDefault(rpcsvc *revrpc.Service, svc *cbauthimpl.Svc) {
-	Default = &authImpl{svc}
+	a := &authImpl{svc}
+	Default = a
+	defaultExt = a
 	go func() {
 		panic(runRPCForSvc(rpcsvc, svc))
 	}()
@@ -159,6 +162,10 @@ func WithAuthenticator(a Authenticator, body func(a Authenticator) error) error 
 		}
 	}
 	return body(a)
+}
+
+func GetExternalAuthenticator() ExternalAuthenticator {
+	return defaultExt
 }
 
 // AuthWebCreds method extracts credentials from given http request
