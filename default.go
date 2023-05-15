@@ -99,11 +99,7 @@ func getCbauthErrorPolicy(svc *cbauthimpl.Svc,
 		// policy. That way we always mark service as stale
 		// right after some error occurred.
 		return func(err error) error {
-			resetErr := err
-			if err == nil {
-				resetErr = errDisconnected
-			}
-			cbauthimpl.ResetSvc(svc, &DBStaleError{resetErr})
+			cbauthimpl.ResetSvc(svc, &DBStaleError{err})
 			return defPolicy(err)
 		}
 	}
