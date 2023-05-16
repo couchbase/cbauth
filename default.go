@@ -217,6 +217,22 @@ func GetClusterEncryptionConfig() (ClusterEncryptionConfig, error) {
 	return Default.GetClusterEncryptionConfig()
 }
 
+func GetLimitsConfig() (LimitsConfig, error) {
+	if Default == nil {
+		return LimitsConfig{}, ErrNotInitialized
+	}
+
+	return Default.GetLimitsConfig()
+}
+
+func GetUserLimits(user, domain, service string) (map[string]int, error) {
+	if Default == nil {
+		return map[string]int{}, ErrNotInitialized
+	}
+
+	return Default.GetUserLimits(user, domain, service)
+}
+
 func GetUserUuid(user, domain string) (string, error) {
 	if Default == nil {
 		return "", ErrNotInitialized

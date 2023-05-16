@@ -42,6 +42,7 @@ type TLSRefreshCallback cbauthimpl.TLSRefreshCallback
 const (
 	CFG_CHANGE_CERTS_TLSCONFIG uint64 = 1 << iota
 	CFG_CHANGE_CLUSTER_ENCRYPTION
+	CFG_CHANGE_USER_LIMITS
 )
 
 // ConfigRefreshCallback type describes the callback that is called when there is
@@ -55,6 +56,9 @@ type TLSConfig cbauthimpl.TLSConfig
 // ClusterEncryptionConfig contains info about whether to use SSL ports for
 // communication channels and whether to disable non-SSL ports.
 type ClusterEncryptionConfig cbauthimpl.ClusterEncryptionConfig
+
+// LimitsConfig contains info about limits settings.
+type LimitsConfig cbauthimpl.LimitsConfig
 
 // Authenticator is main cbauth interface. It supports both incoming
 // and outgoing auth.
@@ -91,6 +95,11 @@ type Authenticator interface {
 	// GetTLSConfig returns TLSConfig structure which includes cipher suites,
 	// min tls version, etc.
 	GetTLSConfig() (TLSConfig, error)
+	// GetLimitsConfig returns LimitsConfig which provides information on limits
+	// settings.
+	GetLimitsConfig() (LimitsConfig, error)
+	// GetUserLimits returns users limit for a service.
+	GetUserLimits(user, domain, service string) (map[string]int, error)
 	// GetUserUuid returns uuid for a user.
 	GetUserUuid(user, domain string) (string, error)
 	// GetUserBuckets returns buckets on which a user has any of the
@@ -245,6 +254,16 @@ func (a *authImpl) GetClusterEncryptionConfig() (ClusterEncryptionConfig, error)
 func (a *authImpl) GetTLSConfig() (TLSConfig, error) {
 	cfg, err := cbauthimpl.GetTLSConfig(a.svc)
 	return TLSConfig(cfg), err
+}
+
+func (a *authImpl) GetLimitsConfig() (LimitsConfig, error) {
+	cfg, err := cbauthimpl.GetLimitsConfig(a.svc)
+	return LimitsConfig(cfg), err
+}
+
+func (a *authImpl) GetUserLimits(user, domain, service string) (map[string]int, error) {
+	limits, err := cbauthimpl.GetUserLimits(a.svc, user, domain, service)
+	return limits, err
 }
 
 func (a *authImpl) GetUserUuid(user, domain string) (string, error) {
