@@ -559,7 +559,7 @@ func NewSVC(period time.Duration, staleErr error) *Svc {
 	})
 }
 
-// NewSVCForTest constructs Svc isntance.
+// NewSVCForTest constructs Svc instance.
 func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Duration, chan struct{}, func())) *Svc {
 	if staleErr == nil {
 		panic("staleErr must be non-nil")
