@@ -153,6 +153,7 @@ func getMemcachedCreds(n Node, host string, port int) (user, password string) {
 }
 
 type credsDB struct {
+	nodeUUID                string
 	nodes                   []Node
 	authCheckURL            string
 	permissionCheckURL      string
@@ -190,6 +191,19 @@ type Cache struct {
 	ClientCertAuthVersion   string                  `json:"clientCertAuthVersion"`
 	ClusterEncryptionConfig ClusterEncryptionConfig `json:"clusterEncryptionConfig"`
 	TLSConfig               tlsConfigImport         `json:"tlsConfig"`
+}
+
+// Cache is a structure into which the revrpc json is unmarshalled if
+// used from external service
+type CacheExt struct {
+	AuthCheckEndpoint           string
+	AuthVersion                 string
+	PermissionCheckEndpoint     string
+	PermissionsVersion          string
+	ExtractUserFromCertEndpoint string
+	ClientCertAuthVersion       string
+	ClientCertAuthState         string
+	NodeUUID                    string
 }
 
 // CredsImpl implements cbauth.Creds interface.
@@ -423,6 +437,9 @@ type Svc struct {
 	semaphore           semaphore
 	tlsNotifier         *tlsNotifier
 	cfgChangeNotifier   *cfgChangeNotifier
+	hostport            string
+	user                string
+	password            string
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -447,12 +464,45 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 	return
 }
 
+func (s *Svc) cacheToCredsDBExt(c *CacheExt) (db *credsDB) {
+	tlsConfig := TLSConfig{
+		ClientAuthType: getAuthType(c.ClientCertAuthState),
+	}
+	db = &credsDB{
+		authCheckURL:       s.buildUrl(c.AuthCheckEndpoint),
+		permissionCheckURL: s.buildUrl(c.PermissionCheckEndpoint),
+		permissionsVersion: c.PermissionsVersion,
+		authVersion:        c.AuthVersion,
+		extractUserFromCertURL: s.buildUrl(
+			c.ExtractUserFromCertEndpoint),
+		clientCertAuthVersion: c.ClientCertAuthVersion,
+		specialUser:           s.user,
+		specialPasswords:      []string{s.password},
+		tlsConfig:             tlsConfig,
+		nodeUUID:              c.NodeUUID,
+	}
+	return
+}
+
 func updateDBLocked(s *Svc, db *credsDB) {
 	s.db = db
 	if s.freshChan != nil {
 		close(s.freshChan)
 		s.freshChan = nil
 	}
+}
+
+// UpdateDBExt is a revrpc method that is used by ns_server update external
+// cbauth state.
+func (s *Svc) UpdateDBExt(c *CacheExt, outparam *bool) error {
+	if outparam != nil {
+		*outparam = true
+	}
+	db := s.cacheToCredsDBExt(c)
+	s.l.Lock()
+	updateDBLocked(s, db)
+	s.l.Unlock()
+	return nil
 }
 
 // UpdateDB is a revrpc method that is used by ns_server update cbauth
@@ -501,7 +551,7 @@ func NewSVC(period time.Duration, staleErr error) *Svc {
 	})
 }
 
-// NewSVCForTest constructs Svc isntance.
+// NewSVCForTest constructs Svc instance.
 func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Duration, chan struct{}, func())) *Svc {
 	if staleErr == nil {
 		panic("staleErr must be non-nil")
@@ -548,6 +598,16 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 // SetTransport allows to change RoundTripper for Svc
 func SetTransport(s *Svc, rt http.RoundTripper) {
 	s.httpClient = &http.Client{Transport: rt}
+}
+
+func (s *Svc) SetConnectInfo(hostport, user, password string) {
+	s.hostport = hostport
+	s.user = user
+	s.password = password
+}
+
+func (s *Svc) buildUrl(uri string) string {
+	return "http://" + s.hostport + uri
 }
 
 func (s *Svc) needConfigRefresh(db *credsDB) uint64 {
@@ -1217,4 +1277,13 @@ func getUserIdentityFromCert(cert *x509.Certificate, db *credsDB, s *Svc) (*Cred
 	}
 
 	return rv, nil
+}
+
+// GetNodeUuid returns UUID of the node cbauth is currently connecting to
+func GetNodeUuid(s *Svc) (string, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return "", staleError(s)
+	}
+	return db.nodeUUID, nil
 }

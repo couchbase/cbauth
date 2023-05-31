@@ -36,6 +36,9 @@ var mgmtURLFlag string
 var listenFlag string
 var useFullerRequestFlag bool
 var authFlag string
+var externalFlag bool
+var authU string
+var authP string
 
 const uaCbauthEgSuffix = "cbauth"
 const uaCbauthEgVersion = ""
@@ -46,6 +49,8 @@ func initFlags() {
 	flag.StringVar(&mgmtURLFlag, "mgmtURL", "", "base url of mgmt service (e.g. http://lh:8091/)")
 	flag.StringVar(&listenFlag, "listen", "", "listen endpoint (e.g. :8080)")
 	flag.BoolVar(&useFullerRequestFlag, "use-fuller-request", false, "")
+	flag.BoolVar(&externalFlag, "external", false,
+		"test cbauth for external clients")
 	flag.StringVar(&authFlag, "auth", "", "user:password to use to initialize cbauth")
 	flag.Parse()
 }
@@ -145,7 +150,7 @@ func performBucketRequest(bucket, baseURL string) (json []byte, err error) {
 	return doBucketRequestSimpler(bucket, baseURL)
 }
 
-func recogniseBucket(req *http.Request) (bucket string) {
+func getPathTail(req *http.Request) (bucket string) {
 	path := req.RequestURI[1:]
 	segments := strings.Split(path, "/")
 	if len(segments) != 2 {
@@ -156,7 +161,12 @@ func recogniseBucket(req *http.Request) (bucket string) {
 }
 
 func authAndPerformBucketRequest(w http.ResponseWriter, req *http.Request, bucket, baseURL string) (err error) {
-	creds, err := cbauth.AuthWebCreds(req)
+	var creds cbauth.Creds
+	if externalFlag {
+		creds, err = cbauth.GetExternalAuthenticator().AuthWebCreds(req)
+	} else {
+		creds, err = cbauth.AuthWebCreds(req)
+	}
 
 	if err == cbauth.ErrNoAuth {
 		cbauth.SendUnauthorized(w)
@@ -180,6 +190,10 @@ func authAndPerformBucketRequest(w http.ResponseWriter, req *http.Request, bucke
 		return nil
 	}
 
+	if externalFlag {
+		return
+	}
+
 	payload, err := performBucketRequest(bucket, baseURL)
 	if err != nil {
 		return
@@ -196,12 +210,37 @@ func doServeBucket(w http.ResponseWriter, req *http.Request) error {
 		return nil
 	}
 
-	bucket := recogniseBucket(req)
+	bucket := getPathTail(req)
 	if bucket == "" {
 		http.NotFound(w, req)
 		return nil
 	}
 	return authAndPerformBucketRequest(w, req, bucket, mgmtURLFlag)
+}
+
+func doServeReconnect(w http.ResponseWriter, req *http.Request) error {
+	hostport := getPathTail(req)
+	if hostport == "" {
+		http.NotFound(w, req)
+		return nil
+	}
+	if !externalFlag {
+		http.NotFound(w, req)
+		return nil
+	}
+
+	err := cbauth.InitExternal("external-tool", hostport, authU, authP)
+	if err != nil {
+		return err
+	}
+
+	uuid, err := cbauth.GetExternalAuthenticator().GetNodeUuid()
+	if err != nil {
+		return err
+	}
+
+	w.Write([]byte(uuid))
+	return nil
 }
 
 func recogniseHostBucket(req *http.Request) (host, bucket string) {
@@ -232,6 +271,7 @@ func doServeHostBucket(w http.ResponseWriter, req *http.Request) error {
 
 var serveBucket = servingWithError(doServeBucket)
 var serveHostBucket = servingWithError(doServeHostBucket)
+var serveReconnect = servingWithError(doServeReconnect)
 
 type errHandler func(w http.ResponseWriter, req *http.Request) error
 type nonErrHandler func(w http.ResponseWriter, req *http.Request)
@@ -250,12 +290,17 @@ func maybeReinitCBAuth() {
 		return
 	}
 	up := strings.Split(authFlag, ":")
-	authU, authP := up[0], up[1]
+	authU, authP = up[0], up[1]
 	u, err := url.Parse(mgmtURLFlag)
 	if err != nil {
 		log.Fatal("Failed to parse mgmtURLFlag: ", err)
 	}
-	_, err = cbauth.InternalRetryDefaultInit(u.Host, authU, authP)
+	if externalFlag {
+		err = cbauth.InitExternal(
+			"external-tool", u.Host, authU, authP)
+	} else {
+		_, err = cbauth.InternalRetryDefaultInit(u.Host, authU, authP)
+	}
 	if err != nil {
 		log.Fatal("Failed to initialize cbauth: ", err)
 	}
@@ -276,6 +321,7 @@ func main() {
 
 	http.HandleFunc("/bucket/", serveBucket)
 	http.HandleFunc("/h/", serveHostBucket)
+	http.HandleFunc("/reconnect/", serveReconnect)
 	go runStdinWatcher()
 	maybeReinitCBAuth()
 	log.Fatal(http.ListenAndServe(listenFlag, nil))

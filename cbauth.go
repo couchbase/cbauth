@@ -56,9 +56,7 @@ type TLSConfig cbauthimpl.TLSConfig
 // communication channels and whether to disable non-SSL ports.
 type ClusterEncryptionConfig cbauthimpl.ClusterEncryptionConfig
 
-// Authenticator is main cbauth interface. It supports both incoming
-// and outgoing auth.
-type Authenticator interface {
+type BaseAuthenticator interface {
 	// AuthWebCreds method extracts credentials from given http request.
 	AuthWebCreds(req *http.Request) (creds Creds, err error)
 	// AuthWebCredsGeneric method extracts credentials from an HTTP request
@@ -68,6 +66,20 @@ type Authenticator interface {
 	Auth(user, pwd string) (creds Creds, err error)
 	// GetHTTPServiceAuth returns user/password creds giving
 	// "admin" access to given http service inside couchbase cluster.
+}
+
+// ExternalAuthenticator is cbauth interface for external clients. It supports
+// only incoming auth.
+type ExternalAuthenticator interface {
+	BaseAuthenticator
+	// GetNodeUuid returns UUID of the node cbauth is currently connecting to
+	GetNodeUuid() (string, error)
+}
+
+// Authenticator is main cbauth interface. It supports both incoming
+// and outgoing auth.
+type Authenticator interface {
+	BaseAuthenticator
 	GetHTTPServiceAuth(hostport string) (user, pwd string, err error)
 	// GetMemcachedServiceAuth returns user/password creds given
 	// "admin" access to given memcached service.
@@ -247,6 +259,10 @@ func (a *authImpl) GetTLSConfig() (TLSConfig, error) {
 func (a *authImpl) GetUserUuid(user, domain string) (string, error) {
 	uuid, err := cbauthimpl.GetUserUuid(a.svc, user, domain)
 	return uuid, err
+}
+
+func (a *authImpl) GetNodeUuid() (string, error) {
+	return cbauthimpl.GetNodeUuid(a.svc)
 }
 
 func (a *authImpl) GetUserBuckets(user, domain string) ([]string, error) {

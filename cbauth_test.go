@@ -704,7 +704,7 @@ func CheckStaleErrorFormatting(t *testing.T, URL string, expectedErrorPrefix str
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		runRPCForSvc(rpcsvc, a.svc)
+		runRPCForSvc(rpcsvc, a.svc, getCbauthErrorPolicy(a.svc, false))
 		wg.Done()
 	}()
 

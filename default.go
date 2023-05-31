@@ -19,11 +19,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/rpc"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/couchbase/cbauth/cbauthimpl"
@@ -37,34 +39,93 @@ import (
 // ns_server.
 var Default Authenticator
 
+type restartableAuthImpl struct {
+	l sync.RWMutex
+	a ExternalAuthenticator
+	s *revrpc.Service
+}
+
+func (r *restartableAuthImpl) getAuth() ExternalAuthenticator {
+	r.l.RLock()
+	defer r.l.RUnlock()
+	return r.a
+}
+
+func (r *restartableAuthImpl) setAuth(a ExternalAuthenticator,
+	s *revrpc.Service) {
+	r.l.Lock()
+	defer r.l.Unlock()
+	r.a = a
+	r.s = s
+}
+
+func (r *restartableAuthImpl) disconnect() error {
+	r.l.Lock()
+	defer r.l.Unlock()
+
+	if r.s == nil {
+		return nil
+	}
+
+	err := r.s.Disconnect()
+	if err != nil {
+		return err
+	}
+	r.s = nil
+	return nil
+}
+
+var externalAuth = restartableAuthImpl{}
+
 var errDisconnected = errors.New("revrpc connection to ns_server was closed")
 
 const waitBeforeStale = time.Minute
 
-func runRPCForSvc(rpcsvc *revrpc.Service, svc *cbauthimpl.Svc) error {
-	defPolicy := revrpc.DefaultBabysitErrorPolicy.New()
-	// error restart policy that we're going to use simply
-	// resets service before delegating to default restart
-	// policy. That way we always mark service as stale
-	// right after some error occurred.
-	cbauthPolicy := func(err error) error {
-		resetErr := err
-		if err == nil {
-			resetErr = errDisconnected
+func getCbauthErrorPolicy(svc *cbauthimpl.Svc,
+	external bool) revrpc.ErrorPolicyFn {
+
+	if external {
+		defPolicy := getCbauthErrorPolicy(svc, false)
+		return func(err error) error {
+			if err == io.EOF {
+				cbauthimpl.ResetSvc(svc, &DBStaleError{err})
+				return errDisconnected
+			}
+			return defPolicy(err)
 		}
-		cbauthimpl.ResetSvc(svc, &DBStaleError{resetErr})
-		return defPolicy(err)
+	} else {
+		defPolicy := revrpc.DefaultBabysitErrorPolicy.New()
+		// error restart policy that we're going to use simply
+		// resets service before delegating to default restart
+		// policy. That way we always mark service as stale
+		// right after some error occurred.
+		return func(err error) error {
+			cbauthimpl.ResetSvc(svc, &DBStaleError{err})
+			return defPolicy(err)
+		}
 	}
-	return revrpc.BabysitService(func(s *rpc.Server) error {
-		return s.RegisterName("AuthCacheSvc", svc)
-	}, rpcsvc, revrpc.FnBabysitErrorPolicy(cbauthPolicy))
 }
 
-func startDefault(rpcsvc *revrpc.Service) {
-	svc := cbauthimpl.NewSVC(waitBeforeStale, &DBStaleError{})
-	Default = &authImpl{svc}
+func runRPCForSvc(rpcsvc *revrpc.Service, svc *cbauthimpl.Svc,
+	policy revrpc.ErrorPolicyFn) error {
+	return revrpc.BabysitService(func(s *rpc.Server) error {
+		return s.RegisterName("AuthCacheSvc", svc)
+	}, rpcsvc, revrpc.FnBabysitErrorPolicy(policy))
+}
+
+func startDefault(rpcsvc *revrpc.Service, svc *cbauthimpl.Svc,
+	policy revrpc.ErrorPolicyFn, external bool) {
+	if external {
+		externalAuth.setAuth(&authImpl{svc}, rpcsvc)
+	} else {
+		Default = &authImpl{svc}
+	}
 	go func() {
-		panic(runRPCForSvc(rpcsvc, svc))
+		err := runRPCForSvc(rpcsvc, svc, policy)
+		if errors.Is(err, errDisconnected) {
+			return
+		}
+		panic(err)
 	}()
 }
 
@@ -74,7 +135,24 @@ func init() {
 		ErrNotInitialized = fmt.Errorf("Unable to initialize cbauth's revrpc: %s", err)
 		return
 	}
-	startDefault(rpcsvc)
+	svc := newSvc()
+	startDefault(rpcsvc, svc, getCbauthErrorPolicy(svc, false), false)
+}
+
+func newSvc() *cbauthimpl.Svc {
+	return cbauthimpl.NewSVC(waitBeforeStale, &DBStaleError{})
+}
+
+// InitExternal should be used by external cbauth client to enable cbauth
+// with limited functionality.
+func InitExternal(service, mgmtHostPort, user, password string) error {
+	err := externalAuth.disconnect()
+	if err != nil {
+		return err
+	}
+	_, err = doInternalRetryDefaultInitWithService(service,
+		mgmtHostPort, user, password, true)
+	return err
 }
 
 // InternalRetryDefaultInit can be used by golang services that are
@@ -96,19 +174,35 @@ func InternalRetryDefaultInitWithService(service, mgmtHostPort, user, password s
 	if Default != nil {
 		return false, nil
 	}
-	serviceName := service + "-cbauth"
+	return doInternalRetryDefaultInitWithService(service+"-cbauth",
+		mgmtHostPort, user, password, false)
+}
+
+func doInternalRetryDefaultInitWithService(
+	service, mgmtHostPort, user, password string,
+	external bool) (bool, error) {
 	host, port, err := SplitHostPort(mgmtHostPort)
 	if err != nil {
 		return false, fmt.Errorf("Failed to split hostport `%s': %s", mgmtHostPort, err)
 	}
-	baseurl := fmt.Sprintf("http://%s:%d/%s", host, port, serviceName)
+	var baseurl string
+	if external {
+		baseurl = fmt.Sprintf("http://%s:%d/auth/v1/%s",
+			host, port, service)
+	} else {
+		baseurl = fmt.Sprintf("http://%s:%d/%s", host, port, service)
+	}
 	u, err := url.Parse(baseurl)
 	if err != nil {
 		return false, fmt.Errorf("Failed to parse constructed url `%s': %s", baseurl, err)
 	}
 	u.User = url.UserPassword(user, password)
 
-	startDefault(revrpc.MustService(u.String()))
+	svc := newSvc()
+	svc.SetConnectInfo(mgmtHostPort, user, password)
+
+	startDefault(revrpc.MustService(u.String()), svc,
+		getCbauthErrorPolicy(svc, external), external)
 
 	return true, nil
 }
@@ -135,6 +229,10 @@ func WithAuthenticator(a Authenticator, body func(a Authenticator) error) error 
 		}
 	}
 	return body(a)
+}
+
+func GetExternalAuthenticator() ExternalAuthenticator {
+	return externalAuth.getAuth()
 }
 
 // AuthWebCreds method extracts credentials from given http request
