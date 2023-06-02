@@ -1,6 +1,7 @@
 package cbauth
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -130,8 +131,14 @@ func (rt *testingRoundTripper) permissionsRoundTrip(req *http.Request) (res *htt
 
 	statusCode := 401
 
-	// for simplicity let's grant only permission that matches the username
+	// for simplicity let's grant the permission that matches the username
 	if permission[0] == user[0] {
+		statusCode = 200
+	}
+
+	// granted to admins for on-behalf to work
+	if permission[0] == "cluster.admin.security.admin!impersonate" &&
+		domain[0] == "admin" {
 		statusCode = 200
 	}
 
@@ -303,11 +310,30 @@ func assertCreds(t *testing.T, c Creds, name, domain string) {
 	}
 }
 
-func basicAuthRequest(a *authImpl, user, password string) (Creds, error) {
+func getBasicAuthRequest(user, password string) *http.Request {
 	req, err := http.NewRequest("GET", "http://q:11234/_whatever", nil)
 	must(err)
 	req.SetBasicAuth(user, password)
+	return req
+}
 
+func basicAuthRequest(a *authImpl, user, password string) (Creds, error) {
+	return a.AuthWebCreds(getBasicAuthRequest(user, password))
+}
+
+func assertAuthFailure(t *testing.T, c Creds, err error) {
+	if err == nil {
+		t.Errorf("Should not be authenticated. Creds = %v", c)
+	}
+	assertEqual(t, "error", "Authentication failure", err.Error())
+}
+
+func onBehalfRequest(a *authImpl, user, password, onBehalfUser,
+	onBehalfDomain string) (Creds, error) {
+	req := getBasicAuthRequest(user, password)
+	data := []byte(onBehalfUser + ":" + onBehalfDomain)
+	req.Header.Set("cb-on-behalf-of",
+		base64.StdEncoding.EncodeToString(data))
 	return a.AuthWebCreds(req)
 }
 
@@ -330,10 +356,30 @@ func TestBasicAuth(t *testing.T) {
 
 	c, err = basicAuthRequest(a, "user1", "wrong")
 	rt.assertTripped(t, true)
-	if err == nil {
-		t.Errorf("Should not be authenticated. Creds = %v", c)
-	}
-	assertEqual(t, "error", "Authentication failure", err.Error())
+	assertAuthFailure(t, c, err)
+}
+
+func TestOnBehalf(t *testing.T) {
+	rt := newTestingRT(t)
+	rt.addUser("admin", "admin", "pwd")
+	rt.addUser("joe", "local", "pwd")
+	rt.addUser("puppet", "local", "asdasd")
+
+	a := prepareAuth(rt)
+	c, err := onBehalfRequest(a, "admin", "pwd", "puppet", "local")
+	must(err)
+	rt.assertTripped(t, true)
+	assertCreds(t, c, "puppet", "local")
+	rt.resetTripped()
+
+	c, err = onBehalfRequest(a, "joe", "pwd", "puppet", "local")
+	rt.assertTripped(t, true)
+	assertAuthFailure(t, c, err)
+	rt.resetTripped()
+
+	c, err = onBehalfRequest(a, "admin", "wrong", "puppet", "local")
+	rt.assertTripped(t, true)
+	assertAuthFailure(t, c, err)
 }
 
 func TestTokenAdmin(t *testing.T) {
