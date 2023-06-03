@@ -699,12 +699,17 @@ func verifyPasswordOnServer(s *Svc, user, password string) (*CredsImpl, error) {
 func VerifyOnBehalf(s *Svc, user, password, onBehalfUser,
 	onBehalfDomain string) (*CredsImpl, error) {
 
-	db := fetchDB(s)
-	if db == nil {
-		return nil, staleError(s)
+	creds, err := VerifyPassword(s, user, password)
+	if err != nil {
+		return nil, err
 	}
 
-	if verifySpecialCreds(db, user, password) {
+	allowed, err := creds.IsAllowed(
+		"cluster.admin.security.admin!impersonate")
+	if err != nil {
+		return nil, err
+	}
+	if allowed {
 		return &CredsImpl{
 			name:   onBehalfUser,
 			s:      s,

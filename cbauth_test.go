@@ -1,6 +1,7 @@
 package cbauth
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -49,17 +50,6 @@ func acc(ok bool, err error) bool {
 	return ok
 }
 
-func assertAdmins(t *testing.T, c Creds, needAdmin, needROAdmin bool) {
-	if acc(c.IsAllowed("cluster.admin.settings!write")) != needAdmin {
-		t.Fatalf("admin access must be: %v", needAdmin)
-	}
-	roadmin := !acc(c.IsAllowed("cluster.admin.settings!write")) &&
-		acc(c.IsAllowed("cluster.admin.security!read"))
-	if roadmin != needROAdmin {
-		t.Fatalf("ro-admin access must be: %v", needROAdmin)
-	}
-}
-
 func newCache(a *authImpl) *cbauthimpl.Cache {
 	url := "http://127.0.0.1:9000"
 	return &cbauthimpl.Cache{
@@ -68,6 +58,12 @@ func newCache(a *authImpl) *cbauthimpl.Cache {
 		UserBucketsURL:     url + "/_getUserBuckets",
 		UuidCheckURL:       url + "/_getUserUuid",
 	}
+}
+
+type testingUser struct {
+	user     string
+	domain   string
+	password string
 }
 
 // GetUserUuid and GetUserBuckets return a result for {user, domain}
@@ -102,9 +98,7 @@ type testingRoundTripper struct {
 	t                   *testing.T
 	info                *GetReqTestInfo
 	baseURL             string
-	user                string
-	domain              string
-	token               string
+	users               []testingUser
 	tripped             bool
 	disableSerialChecks bool
 }
@@ -177,17 +171,14 @@ func (rt *testingRoundTripper) permissionsRoundTrip(req *http.Request) (res *htt
 	statusCode := 401
 
 	if rt.info == nil {
-		switch domain[0] {
-		case "admin":
+		// for simplicity let's grant the permission that matches the username
+		if permission[0] == user[0] {
 			statusCode = 200
-		case "bucket":
-			if permission[0] == "cluster.bucket["+user[0]+"].data!write" {
-				statusCode = 200
-			}
-		case "anonymous":
-			if permission[0] == "cluster.bucket[default].data!write" {
-				statusCode = 200
-			}
+		}
+
+		if permission[0] == "cluster.admin.security.admin!impersonate" &&
+			domain[0] == "admin" {
+			statusCode = 200
 		}
 	} else {
 		// TestGetProcessRequest compares results with those in rt.info
@@ -292,34 +283,50 @@ func (rt *testingRoundTripper) authRoundTrip(req *http.Request) (res *http.Respo
 	rt.assertTripped(rt.t, false)
 	rt.setTripped()
 
-	statusCode := 200
-
+	var foundUser *testingUser
 	if req.Header.Get("ns-server-ui") == "yes" {
 		token, err := req.Cookie("ui-auth-q")
-		if err != nil || (!rt.disableSerialChecks && rt.token != token.Value) {
-			statusCode = 401
+		if err != nil {
+			panic("ui-auth-q cookie is required")
 		}
-	} else {
-		log.Fatal("Expect to be called only with ns-server-ui=yes")
-	}
-
-	response := ""
-	if statusCode == 200 {
 		if rt.info == nil {
-			response = fmt.Sprintf(`{"user": "%s", "domain": "%s"}`, rt.user, rt.domain)
+			for _, user := range rt.users {
+				if user.password == token.Value {
+					foundUser = &user
+					break
+				}
+			}
 		} else {
 			user, err1 := req.Cookie("user")
 			domain, err2 := req.Cookie("domain")
 			if err1 == nil && err2 == nil {
-				response = fmt.Sprintf(`{"user": "%s", "domain": "%s"}`,
-					user.Value, domain.Value)
+				foundUser =
+					&testingUser{user: user.Value,
+						domain: domain.Value}
 			} else {
 				log.Fatal("Error parsing user and domain")
 			}
 		}
+	} else {
+		username, password, ok := req.BasicAuth()
+		if !ok {
+			log.Fatal("Need basic auth header")
+		}
+		for _, user := range rt.users {
+			if user.password == password &&
+				user.user == username {
+				foundUser = &user
+				break
+			}
+		}
 	}
 
-	return respond(req, statusCode, response), nil
+	if foundUser != nil {
+		response := fmt.Sprintf(`{"user": "%s", "domain": "%s"}`,
+			foundUser.user, foundUser.domain)
+		return respond(req, 200, response), nil
+	}
+	return respond(req, 401, ""), nil
 }
 
 func (rt *testingRoundTripper) setTripped() {
@@ -338,16 +345,14 @@ func (rt *testingRoundTripper) assertTripped(t *testing.T, expected bool) {
 	if rt.disableSerialChecks {
 		return
 	} else if rt.tripped != expected {
-		t.Fatalf("Tripped is not expected. Have: %v, need: %v", rt.tripped, expected)
+		t.Fatalf("Tripped is not expected. Have: %v, need: %v",
+			rt.tripped, expected)
 	}
 }
 
-func (rt *testingRoundTripper) setTokenAuth(user, domain, token string) {
-	if !rt.disableSerialChecks {
-		rt.token = token
-		rt.domain = domain
-		rt.user = user
-	}
+func (rt *testingRoundTripper) addUser(user, domain, password string) {
+	u := testingUser{user: user, domain: domain, password: password}
+	rt.users = append(rt.users, u)
 }
 
 func TestStaleBasic(t *testing.T) {
@@ -432,14 +437,109 @@ func TestServicePwd(t *testing.T) {
 	}
 }
 
-func TestTokenAdmin(t *testing.T) {
-	rt := newTestingRT(t)
-	rt.setTokenAuth("Administrator", "admin", "1234567890")
-
+func prepareAuth(rt *testingRoundTripper) *authImpl {
 	a := newAuth(0)
 	a.setTransport(rt)
 
 	must(a.svc.UpdateDB(newCache(a), nil))
+	return a
+}
+
+func assertEqual(t *testing.T, name, expect, actual string) {
+	if expect != actual {
+		t.Errorf("Expect %v to be %v, Got %v", name, expect, actual)
+	}
+}
+
+func assertCreds(t *testing.T, c Creds, name, domain string) {
+	assertEqual(t, "Name", name, c.Name())
+	assertEqual(t, "Domain", domain, c.Domain())
+	if !acc(c.IsAllowed(name)) {
+		t.Errorf("Expect permission %v to be granted", name)
+	}
+	if acc(c.IsAllowed("something else")) {
+		t.Errorf("Expect permissions other than %v not to be granted",
+			name)
+	}
+}
+
+func getBasicAuthRequest(user, password string) *http.Request {
+	req, err := http.NewRequest("GET", "http://q:11234/_whatever", nil)
+	must(err)
+	req.SetBasicAuth(user, password)
+	return req
+}
+
+func basicAuthRequest(a *authImpl, user, password string) (Creds, error) {
+	return a.AuthWebCreds(getBasicAuthRequest(user, password))
+}
+
+func assertAuthFailure(t *testing.T, c Creds, err error) {
+	if err == nil {
+		t.Errorf("Should not be authenticated. Creds = %v", c)
+	}
+	assertEqual(t, "error", "Authentication failure", err.Error())
+}
+
+func onBehalfRequest(a *authImpl, user, password, onBehalfUser,
+	onBehalfDomain string) (Creds, error) {
+	req := getBasicAuthRequest(user, password)
+	data := []byte(onBehalfUser + ":" + onBehalfDomain)
+	req.Header.Set("cb-on-behalf-of",
+		base64.StdEncoding.EncodeToString(data))
+	return a.AuthWebCreds(req)
+}
+
+func TestBasicAuth(t *testing.T) {
+	rt := newTestingRT(t)
+	rt.addUser("user1", "local", "asdasd")
+
+	a := prepareAuth(rt)
+
+	c, err := basicAuthRequest(a, "user1", "asdasd")
+	must(err)
+	rt.assertTripped(t, true)
+	assertCreds(t, c, "user1", "local")
+	rt.resetTripped()
+
+	c, err = basicAuthRequest(a, "user1", "asdasd")
+	must(err)
+	rt.assertTripped(t, false)
+	assertCreds(t, c, "user1", "local")
+
+	c, err = basicAuthRequest(a, "user1", "wrong")
+	rt.assertTripped(t, true)
+	assertAuthFailure(t, c, err)
+}
+
+func TestOnBehalf(t *testing.T) {
+	rt := newTestingRT(t)
+	rt.addUser("admin", "admin", "pwd")
+	rt.addUser("joe", "local", "pwd")
+	rt.addUser("puppet", "local", "asdasd")
+
+	a := prepareAuth(rt)
+	c, err := onBehalfRequest(a, "admin", "pwd", "puppet", "local")
+	must(err)
+	rt.assertTripped(t, true)
+	assertCreds(t, c, "puppet", "local")
+	rt.resetTripped()
+
+	c, err = onBehalfRequest(a, "joe", "pwd", "puppet", "local")
+	rt.assertTripped(t, true)
+	assertAuthFailure(t, c, err)
+	rt.resetTripped()
+
+	c, err = onBehalfRequest(a, "admin", "wrong", "puppet", "local")
+	rt.assertTripped(t, true)
+	assertAuthFailure(t, c, err)
+}
+
+func TestTokenAdmin(t *testing.T) {
+	rt := newTestingRT(t)
+	rt.addUser("Administrator", "admin", "1234567890")
+
+	a := prepareAuth(rt)
 
 	req, err := http.NewRequest("GET", "http://q:11234/_queryStatsmaybe", nil)
 	must(err)
@@ -449,16 +549,7 @@ func TestTokenAdmin(t *testing.T) {
 	c, err := a.AuthWebCreds(req)
 	must(err)
 	rt.assertTripped(t, true)
-
-	assertAdmins(t, c, true, false)
-
-	if c.Name() != "Administrator" {
-		t.Errorf("Expect name to be Administrator")
-	}
-
-	if c.Domain() != "builtin" {
-		t.Errorf("Expect source to be builtin. Got %s", c.Domain())
-	}
+	assertCreds(t, c, "Administrator", "builtin")
 }
 
 func initTestHandleGetRequestParams(info *GetReqTestInfo) {
@@ -618,8 +709,6 @@ func testHandleGetRequestCore(rt *testingRoundTripper, a *authImpl) {
  */
 func TestGetProcessRequest(t *testing.T) {
 	rt := newTestingRT(t)
-	// tokenValue is validated in authRoundTrip.
-	rt.setTokenAuth("", "", "1234567890")
 	a := newAuth(0)
 	a.setTransport(rt)
 
