@@ -77,6 +77,7 @@ func (r *restartableAuthImpl) disconnect() error {
 var externalAuth = restartableAuthImpl{}
 
 var errDisconnected = errors.New("revrpc connection to ns_server was closed")
+var errUnrecoverable = errors.New("revrpc connection cannot be established")
 
 const waitBeforeStale = time.Minute
 
@@ -89,6 +90,13 @@ func getCbauthErrorPolicy(svc *cbauthimpl.Svc,
 			if err == io.EOF {
 				cbauthimpl.ResetSvc(svc, &DBStaleError{err})
 				return errDisconnected
+			}
+			httpErr, ok := err.(*revrpc.HttpError)
+			if ok &&
+				httpErr.StatusCode == 400 &&
+				httpErr.Message == "Version is not supported" {
+				cbauthimpl.ResetSvc(svc, &DBStaleError{err})
+				return errUnrecoverable
 			}
 			return defPolicy(err)
 		}
@@ -121,7 +129,8 @@ func startDefault(rpcsvc *revrpc.Service, svc *cbauthimpl.Svc,
 	}
 	go func() {
 		err := runRPCForSvc(rpcsvc, svc, policy)
-		if errors.Is(err, errDisconnected) {
+		if errors.Is(err, errDisconnected) ||
+			errors.Is(err, errUnrecoverable) {
 			return
 		}
 		panic(err)

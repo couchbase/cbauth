@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -55,6 +56,16 @@ type Service struct {
 	url     *url.URL
 	codec   *jsonServerCodec
 	stopped bool
+}
+
+type HttpError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *HttpError) Error() string {
+	return fmt.Sprintf("Need 200 status!. Got %v %v",
+		e.StatusCode, e.Message)
 }
 
 // ErrAlreadyRunning is returned from Run method to indicate that
@@ -190,7 +201,15 @@ func (s *Service) Run(setupBody ServiceSetupCallback) error {
 		return err
 	}
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("Need 200 status!. Got %v", *resp)
+		var message = ""
+		if resp.StatusCode == 400 {
+			body, err := ioutil.ReadAll(resp.Body)
+			if err == nil {
+				message = string(body)
+			}
+			resp.Body.Close()
+		}
+		return &HttpError{StatusCode: resp.StatusCode, Message: message}
 	}
 
 	rpcServer := rpc.NewServer()
