@@ -154,12 +154,24 @@ func newSvc() *cbauthimpl.Svc {
 // InitExternal should be used by external cbauth client to enable cbauth
 // with limited functionality.
 func InitExternal(service, mgmtHostPort, user, password string) error {
+	return InitExternalWithHeartbeat(service, mgmtHostPort, user, password,
+		0, 0)
+}
+
+// InitExternalWithHeartbeat should be used by external cbauth client to enable
+// cbauth with limited functionality and enabling heartbeats.
+// heartbeatInterval - interval in seconds at which heartbeats should be sent
+// heartbeatWait - defines how many seconds we wait until declaring the
+//                 database stale
+func InitExternalWithHeartbeat(service, mgmtHostPort, user, password string,
+	heartbeatInterval, heartbeatWait int) error {
 	err := externalAuth.disconnect()
 	if err != nil {
 		return err
 	}
 	_, err = doInternalRetryDefaultInitWithService(service,
-		mgmtHostPort, user, password, true)
+		mgmtHostPort, user, password, true, heartbeatInterval,
+		heartbeatWait)
 	return err
 }
 
@@ -183,12 +195,12 @@ func InternalRetryDefaultInitWithService(service, mgmtHostPort, user, password s
 		return false, nil
 	}
 	return doInternalRetryDefaultInitWithService(service+"-cbauth",
-		mgmtHostPort, user, password, false)
+		mgmtHostPort, user, password, false, 0, 0)
 }
 
 func doInternalRetryDefaultInitWithService(
 	service, mgmtHostPort, user, password string,
-	external bool) (bool, error) {
+	external bool, heartbeatInterval, heartbeatWait int) (bool, error) {
 	host, port, err := SplitHostPort(mgmtHostPort)
 	if err != nil {
 		return false, nil
@@ -200,6 +212,10 @@ func doInternalRetryDefaultInitWithService(
 	} else {
 		baseurl = fmt.Sprintf("http://%s:%d/%s", host, port, service)
 	}
+	if heartbeatInterval != 0 {
+		baseurl = baseurl + fmt.Sprintf("?heartbeat=%v",
+			heartbeatInterval)
+	}
 	u, err := url.Parse(baseurl)
 	if err != nil {
 		return false, fmt.Errorf("Failed to parse constructed url `%s': %s", baseurl, err)
@@ -207,7 +223,8 @@ func doInternalRetryDefaultInitWithService(
 	u.User = url.UserPassword(user, password)
 
 	svc := newSvc()
-	svc.SetConnectInfo(mgmtHostPort, user, password)
+	svc.SetConnectInfo(mgmtHostPort, user, password, heartbeatInterval,
+		heartbeatWait)
 
 	startDefault(revrpc.MustService(u.String()), svc,
 		getCbauthErrorPolicy(svc, external), external)

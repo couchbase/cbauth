@@ -37,6 +37,8 @@ var authFlag string
 var externalFlag bool
 var authU string
 var authP string
+var toolName string
+var heartbeat int
 
 func initFlags() {
 	flag.StringVar(&mgmtURLFlag, "mgmtURL", "", "base url of mgmt service (e.g. http://lh:8091/)")
@@ -45,6 +47,9 @@ func initFlags() {
 	flag.BoolVar(&externalFlag, "external", false,
 		"test cbauth for external clients")
 	flag.StringVar(&authFlag, "auth", "", "user:password to use to initialize cbauth")
+	flag.StringVar(&toolName, "name", "external-tool",
+		"name of the external tool")
+	flag.IntVar(&heartbeat, "heartbeat", 0, "heartbeat interval in seconds")
 	flag.Parse()
 }
 
@@ -220,7 +225,7 @@ func doServeReconnect(w http.ResponseWriter, req *http.Request) error {
 		return nil
 	}
 
-	err := cbauth.InitExternal("external-tool", hostport, authU, authP)
+	err := initExternalTool(hostport)
 	if err != nil {
 		return err
 	}
@@ -276,6 +281,11 @@ func servingWithError(body errHandler) nonErrHandler {
 	}
 }
 
+func initExternalTool(hostport string) error {
+	return cbauth.InitExternalWithHeartbeat(
+		toolName, hostport, authU, authP, heartbeat, heartbeat*2)
+}
+
 func maybeReinitCBAuth() {
 	if authFlag == "" {
 		return
@@ -287,8 +297,7 @@ func maybeReinitCBAuth() {
 		log.Fatal("Failed to parse mgmtURLFlag: ", err)
 	}
 	if externalFlag {
-		err = cbauth.InitExternal(
-			"external-tool", u.Host, authU, authP)
+		err = initExternalTool(u.Host)
 	} else {
 		_, err = cbauth.InternalRetryDefaultInit(u.Host, authU, authP)
 	}
