@@ -170,6 +170,7 @@ type credsDB struct {
 	clientCertAuthVersion   string
 	clusterEncryptionConfig ClusterEncryptionConfig
 	tlsConfig               TLSConfig
+	lastHeard               time.Time
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
@@ -205,6 +206,9 @@ type CacheExt struct {
 	ClientCertAuthState         string
 	NodeUUID                    string
 }
+
+// Void is a structure that represents empty revrpc payload
+type Void *struct{}
 
 // CredsImpl implements cbauth.Creds interface.
 type CredsImpl struct {
@@ -440,6 +444,8 @@ type Svc struct {
 	hostport            string
 	user                string
 	password            string
+	heartbeatInterval   int
+	heartbeatWait       int
 }
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
@@ -480,6 +486,7 @@ func (s *Svc) cacheToCredsDBExt(c *CacheExt) (db *credsDB) {
 		specialPasswords:      []string{s.password},
 		tlsConfig:             tlsConfig,
 		nodeUUID:              c.NodeUUID,
+		lastHeard:             time.Now(),
 	}
 	return
 }
@@ -501,6 +508,18 @@ func (s *Svc) UpdateDBExt(c *CacheExt, outparam *bool) error {
 	db := s.cacheToCredsDBExt(c)
 	s.l.Lock()
 	updateDBLocked(s, db)
+	s.l.Unlock()
+	return nil
+}
+
+func (s *Svc) Heartbeat(Void, outparam *Void) error {
+	if outparam != nil {
+		*outparam = nil
+	}
+	s.l.Lock()
+	if s.db != nil {
+		s.db.lastHeard = time.Now()
+	}
 	s.l.Unlock()
 	return nil
 }
@@ -536,6 +555,9 @@ func ResetSvc(s *Svc, staleErr error) {
 }
 
 func staleError(s *Svc) error {
+	if s.db != nil {
+		return errors.New("Didn't hear from server for a while")
+	}
 	if s.staleErr == nil {
 		panic("impossible Svc state where staleErr is nil!")
 	}
@@ -562,6 +584,8 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 		semaphore:         make(semaphore, 10),
 		tlsNotifier:       newTLSNotifier(),
 		cfgChangeNotifier: newCfgChangeNotifier(),
+		heartbeatInterval: 0,
+		heartbeatWait:     0,
 	}
 
 	dt, ok := http.DefaultTransport.(*http.Transport)
@@ -600,10 +624,13 @@ func SetTransport(s *Svc, rt http.RoundTripper) {
 	s.httpClient = &http.Client{Transport: rt}
 }
 
-func (s *Svc) SetConnectInfo(hostport, user, password string) {
+func (s *Svc) SetConnectInfo(hostport, user, password string,
+	heartbeatInterval, heartbeatWait int) {
 	s.hostport = hostport
 	s.user = user
 	s.password = password
+	s.heartbeatInterval = heartbeatInterval
+	s.heartbeatWait = heartbeatWait
 }
 
 func (s *Svc) buildUrl(uri string) string {
@@ -656,7 +683,7 @@ func fetchDB(s *Svc) *credsDB {
 	s.l.RUnlock()
 
 	if db != nil || c == nil {
-		return db
+		return s.ifNotExpired(db)
 	}
 
 	// if db is stale try to wait a bit
@@ -667,6 +694,15 @@ func fetchDB(s *Svc) *credsDB {
 	s.l.RLock()
 	db = s.db
 	s.l.RUnlock()
+
+	return s.ifNotExpired(db)
+}
+
+func (s *Svc) ifNotExpired(db *credsDB) *credsDB {
+	if s.heartbeatInterval != 0 && int(time.Since(db.lastHeard).Seconds()) >
+		s.heartbeatWait {
+		return nil
+	}
 
 	return db
 }

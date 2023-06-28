@@ -781,7 +781,7 @@ func TestStaleErrorFormatting(t *testing.T) {
 	revrpc.DefaultBabysitErrorPolicy = tmpDef
 
 	commonPrefix := "CBAuth database is stale: last reason: "
-	notFoundErr := commonPrefix + "Need 200 status!. Got {404"
+	notFoundErr := commonPrefix + "Need 200 status!. Got 404"
 	CheckStaleErrorFormatting(t, s.URL+"/test", notFoundErr)
 	invalidCredsErr := commonPrefix + "invalid revrpc credentials"
 	CheckStaleErrorFormatting(t, s.URL+"/unauthenticated", invalidCredsErr)
