@@ -473,7 +473,6 @@ const defaultUserBktsCacheSize = 1024
 const defaultUpCacheSize = 1024
 const defaultAuthCacheSize = 256
 const defaultClientCertCacheSize = 256
-const defaultUlCacheSize = 1024
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
 	db = &credsDB{
