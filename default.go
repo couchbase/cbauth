@@ -358,6 +358,13 @@ func GetUserBuckets(user, domain string) ([]string, error) {
 	return Default.GetUserBuckets(user, domain)
 }
 
+func GetGuardrailStatuses() (GuardrailStatuses, error) {
+	if Default == nil {
+		return GuardrailStatuses{}, ErrNotInitialized
+	}
+	return Default.GetGuardrailStatuses()
+}
+
 // GetTLSConfig returns current tls config that contains cipher suites,
 // min TLS version, etc.
 func GetTLSConfig() (TLSConfig, error) {
