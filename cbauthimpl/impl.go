@@ -1325,7 +1325,7 @@ func minTLSVersion(str string) uint16 {
 		// VersionTLS13 to be present.
 		return 0x0304
 	default:
-		return tls.VersionTLS10
+		return tls.VersionTLS12
 	}
 }
 
