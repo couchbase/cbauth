@@ -224,7 +224,6 @@ type Void *struct{}
 type CredsImpl struct {
 	name     string
 	domain   string
-	password string
 	s        *Svc
 }
 
@@ -1198,7 +1197,6 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	if verifySpecialCreds(db, user, password) {
 		return &CredsImpl{
 			name:     user,
-			password: password,
 			s:        s,
 			domain:   "admin"}, nil
 	}
@@ -1217,7 +1215,6 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 		identity := id.(userIdentity)
 		return &CredsImpl{
 			name:     identity.user,
-			password: password,
 			s:        s,
 			domain:   identity.domain}, nil
 	}
