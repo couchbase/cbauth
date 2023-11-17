@@ -152,6 +152,7 @@ func getMemcachedCreds(n Node, host string, port int) (user, password string) {
 }
 
 type credsDB struct {
+	clusterUUID             string
 	nodeUUID                string
 	nodes                   []Node
 	authCheckURL            string
@@ -203,6 +204,7 @@ type CacheExt struct {
 	ClientCertAuthVersion       string
 	ClientCertAuthState         string
 	NodeUUID                    string
+	ClusterUUID                 string
 }
 
 // Void is a structure that represents empty revrpc payload
@@ -494,6 +496,7 @@ func (s *Svc) cacheToCredsDBExt(c *CacheExt) (db *credsDB) {
 		specialPassword:       s.password,
 		tlsConfig:             tlsConfig,
 		nodeUUID:              c.NodeUUID,
+		clusterUUID:           c.ClusterUUID,
 		lastHeard:             time.Now(),
 	}
 	return
@@ -1296,4 +1299,13 @@ func GetNodeUuid(s *Svc) (string, error) {
 		return "", staleError(s)
 	}
 	return db.nodeUUID, nil
+}
+
+// GetClusterUuid returns UUID of the cluster cbauth is currently connecting to
+func GetClusterUuid(s *Svc) (string, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return "", staleError(s)
+	}
+	return db.clusterUUID, nil
 }
