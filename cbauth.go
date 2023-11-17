@@ -74,6 +74,9 @@ type ExternalAuthenticator interface {
 	BaseAuthenticator
 	// GetNodeUuid returns UUID of the node cbauth is currently connecting to
 	GetNodeUuid() (string, error)
+	// GetClusterUuid returns UUID of the cluster cbauth is currently
+	// connecting to
+	GetClusterUuid() (string, error)
 }
 
 // Authenticator is main cbauth interface. It supports both incoming
@@ -263,6 +266,10 @@ func (a *authImpl) GetUserUuid(user, domain string) (string, error) {
 
 func (a *authImpl) GetNodeUuid() (string, error) {
 	return cbauthimpl.GetNodeUuid(a.svc)
+}
+
+func (a *authImpl) GetClusterUuid() (string, error) {
+	return cbauthimpl.GetClusterUuid(a.svc)
 }
 
 func (a *authImpl) GetUserBuckets(user, domain string) ([]string, error) {
