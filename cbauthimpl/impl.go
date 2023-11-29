@@ -693,8 +693,8 @@ func fetchDB(s *Svc) *credsDB {
 }
 
 func (s *Svc) ifNotExpired(db *credsDB) *credsDB {
-	if s.heartbeatInterval != 0 && int(time.Since(db.lastHeard).Seconds()) >
-		s.heartbeatWait {
+	if db != nil && s.heartbeatInterval != 0 &&
+		int(time.Since(db.lastHeard).Seconds()) > s.heartbeatWait {
 		return nil
 	}
 
