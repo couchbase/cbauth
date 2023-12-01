@@ -465,6 +465,7 @@ type Svc struct {
 	password            string
 	heartbeatInterval   int
 	heartbeatWait       int
+	clusterUUID         string
 }
 
 // Cache sizes should come from ns_server. But in case they are not, we need to
@@ -536,6 +537,17 @@ func (s *Svc) UpdateDBExt(c *CacheExt, outparam *bool) error {
 	}
 	db := s.cacheToCredsDBExt(c)
 	s.l.Lock()
+	if db.clusterUUID == "" {
+		db = nil
+	} else {
+		if s.clusterUUID == "" {
+			s.clusterUUID = db.clusterUUID
+		} else {
+			if s.clusterUUID != db.clusterUUID {
+				db = nil
+			}
+		}
+	}
 	updateDBLocked(s, db)
 	s.l.Unlock()
 	return nil
@@ -784,8 +796,8 @@ func fetchDB(s *Svc) *credsDB {
 }
 
 func (s *Svc) ifNotExpired(db *credsDB) *credsDB {
-	if s.heartbeatInterval != 0 && int(time.Since(db.lastHeard).Seconds()) >
-		s.heartbeatWait {
+	if db != nil && s.heartbeatInterval != 0 &&
+		int(time.Since(db.lastHeard).Seconds()) > s.heartbeatWait {
 		return nil
 	}
 
@@ -804,6 +816,12 @@ func IsAuthTokenPresent(Hdr httpreq.HttpHeader) bool {
 func copyHeader(name string, from httpreq.HttpHeader, to http.Header) {
 	if val := from.Get(name); val != "" {
 		to.Set(name, val)
+	}
+}
+
+func maybeSetClusterUUID(s *Svc, v *url.Values) {
+	if s.clusterUUID != "" {
+		v.Set("uuid", s.clusterUUID)
 	}
 }
 
@@ -875,6 +893,10 @@ func VerifyOnServer(s *Svc, reqHeaders httpreq.HttpHeader) (*CredsImpl, error) {
 }
 
 func executeReqAndGetCreds(s *Svc, req *http.Request) (*CredsImpl, error) {
+	v := url.Values{}
+	maybeSetClusterUUID(s, &v)
+	req.URL.RawQuery = v.Encode()
+
 	hresp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -954,6 +976,7 @@ func getFromServer(s *Svc, db *credsDB, params *ReqParams) (interface{}, error) 
 	if params.permission != "" {
 		v.Set("permission", params.permission)
 	}
+	maybeSetClusterUUID(s, &v)
 	req.URL.RawQuery = v.Encode()
 
 	hresp, err := s.httpClient.Do(req)
