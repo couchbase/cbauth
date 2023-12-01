@@ -537,16 +537,13 @@ func (s *Svc) UpdateDBExt(c *CacheExt, outparam *bool) error {
 	}
 	db := s.cacheToCredsDBExt(c)
 	s.l.Lock()
-	if db.clusterUUID == "" {
+	// if the user did not specify a cluster uuid, use the one from the response
+	if s.clusterUUID == "" {
+		s.clusterUUID = db.clusterUUID
+	}
+	// if there is a cluster uuid, it needs to match the one already stored
+	if db.clusterUUID != "" && s.clusterUUID != db.clusterUUID {
 		db = nil
-	} else {
-		if s.clusterUUID == "" {
-			s.clusterUUID = db.clusterUUID
-		} else {
-			if s.clusterUUID != db.clusterUUID {
-				db = nil
-			}
-		}
 	}
 	updateDBLocked(s, db)
 	s.l.Unlock()
@@ -1458,6 +1455,14 @@ func GetNodeUuid(s *Svc) (string, error) {
 		return "", staleError(s)
 	}
 	return db.nodeUUID, nil
+}
+
+// SetExpectedClusterUuid sets the expected UUID of the cluster we are connecting to
+func SetExpectedClusterUuid(s *Svc, clusterUUID string) error {
+	s.l.Lock()
+	s.clusterUUID = clusterUUID
+	s.l.Unlock()
+	return nil
 }
 
 // GetClusterUuid returns UUID of the cluster cbauth is currently connecting to
