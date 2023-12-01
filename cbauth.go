@@ -77,6 +77,8 @@ type ExternalAuthenticator interface {
 	// GetClusterUuid returns UUID of the cluster cbauth is currently
 	// connecting to
 	GetClusterUuid() (string, error)
+	// SetExpectedClusterUuid sets the UUID we expect the cluster to be
+	SetExpectedClusterUuid(clusterUUID string) error
 }
 
 // Authenticator is main cbauth interface. It supports both incoming
@@ -268,6 +270,10 @@ func (a *authImpl) GetUserUuid(user, domain string) (string, error) {
 
 func (a *authImpl) GetNodeUuid() (string, error) {
 	return cbauthimpl.GetNodeUuid(a.svc)
+}
+
+func (a *authImpl) SetExpectedClusterUuid(clusterUUID string) error {
+	return cbauthimpl.SetExpectedClusterUuid(a.svc, clusterUUID)
 }
 
 func (a *authImpl) GetClusterUuid() (string, error) {
