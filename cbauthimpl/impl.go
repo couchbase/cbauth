@@ -1102,7 +1102,8 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 		return nil, err
 	}
 
-	if rv.domain == "admin" || rv.domain == "local" {
+	if rv.domain == "admin" || rv.domain == "local" ||
+		rv.domain == "stats_reader" {
 		s.authCache.Add(key, userInfo{rv.name, rv.domain, rv.uuid})
 	}
 	return rv, nil
