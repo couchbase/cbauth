@@ -243,7 +243,11 @@ func (s *Service) Disconnect() error {
 	}
 	err := s.codec.Close()
 	if err != nil {
-		return err
+		if errors.Is(err, net.ErrClosed) {
+			// ignore this error
+		} else {
+			return err
+		}
 	}
 	s.codec = nil
 	s.stopped = true
