@@ -31,6 +31,7 @@ import (
 	"github.com/couchbase/cbauth/cbauthimpl"
 	"github.com/couchbase/cbauth/httpreq"
 	"github.com/couchbase/cbauth/revrpc"
+	"github.com/couchbase/clog"
 )
 
 // Default variable holds default authenticator. Default authenticator
@@ -168,7 +169,7 @@ func InitExternalWithHeartbeat(service, mgmtHostPort, user, password string,
 	heartbeatInterval, heartbeatWait int) error {
 	err := externalAuth.disconnect()
 	if err != nil {
-		return err
+		clog.Warnf("failed to disconnect existing external authenticator: %s", err)
 	}
 	_, err = doInternalRetryDefaultInitWithService(service,
 		mgmtHostPort, user, password, true, heartbeatInterval,
