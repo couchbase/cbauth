@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -274,7 +275,13 @@ func (c *CredsImpl) User() (name, domain string) {
 // IsAllowed method returns true if the permission is granted
 // for these credentials
 func (c *CredsImpl) IsAllowed(permission string) (bool, error) {
-	return checkPermission(c.s, c.name, c.domain, permission)
+	return checkPermission(c.s, c.name, c.domain, permission, true)
+}
+
+// IsAllowedInternal method returns true if the permission is
+// granted for these credentials
+func (c *CredsImpl) IsAllowedInternal(permission string) (bool, error) {
+	return checkPermission(c.s, c.name, c.domain, permission, false)
 }
 
 func verifySpecialCreds(db *credsDB, user, password string) bool {
@@ -972,6 +979,7 @@ type ReqParams struct {
 	domain       string
 	service      string
 	permission   string
+	audit        bool
 }
 
 func getFromServer(s *Svc, db *credsDB, params *ReqParams) (interface{}, error) {
@@ -992,6 +1000,7 @@ func getFromServer(s *Svc, db *credsDB, params *ReqParams) (interface{}, error) 
 	v := url.Values{}
 	v.Set("user", params.user)
 	v.Set("domain", params.domain)
+	v.Set("audit", strconv.FormatBool(params.audit))
 	if params.service != "" {
 		v.Set("service", params.service)
 	}
@@ -1113,6 +1122,7 @@ func GetUserUuid(s *Svc, user, domain string) (string, error) {
 		url:          db.uuidCheckURL,
 		user:         user,
 		domain:       domain,
+		audit:        true,
 	}
 
 	cacheSize := db.cacheConfig.UuidCacheSize
@@ -1153,6 +1163,7 @@ func GetUserBuckets(s *Svc, user, domain string) ([]string, error) {
 		url:          db.userBucketsURL,
 		user:         user,
 		domain:       domain,
+		audit:        true,
 	}
 
 	cacheSize := db.cacheConfig.UserBktsCacheSize
@@ -1181,7 +1192,7 @@ type userPermission struct {
 	permission string
 }
 
-func checkPermission(s *Svc, user, domain, permission string) (bool, error) {
+func checkPermission(s *Svc, user, domain, permission string, audit bool) (bool, error) {
 	allowed := false
 
 	db := fetchDB(s)
@@ -1195,6 +1206,7 @@ func checkPermission(s *Svc, user, domain, permission string) (bool, error) {
 		user:         user,
 		domain:       domain,
 		permission:   permission,
+		audit:        audit,
 	}
 
 	var cacheParams *CacheParams

@@ -137,6 +137,10 @@ type Creds interface {
 	// IsAllowed method returns true if the permission is granted
 	// for these credentials
 	IsAllowed(permission string) (bool, error)
+	// IsAllowedInternal method returns true if the permission is
+	// granted for these credentials, but will not log an audit if
+	// it fails.
+	IsAllowedInternal(permission string) (bool, error)
 }
 
 var _ Creds = (*cbauthimpl.CredsImpl)(nil)
