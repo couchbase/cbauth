@@ -47,6 +47,7 @@ const (
 	CFG_CHANGE_CERTS_TLSCONFIG uint64 = 1 << iota
 	CFG_CHANGE_CLUSTER_ENCRYPTION
 	CFG_CHANGE_CLIENT_CERTS_TLSCONFIG
+	CFG_CHANGE_GUARDRAIL_STATUSES
 	_MAX_CFG_CHANGE_FLAGS
 )
 
@@ -99,6 +100,18 @@ type CacheConfig struct {
 	UpCacheSize         int `json:"upCacheSize"`
 	AuthCacheSize       int `json:"authCacheSize"`
 	ClientCertCacheSize int `json:"clientCertCacheSize"`
+}
+
+
+// GuardrailStatus contains the current status for a resource that we want
+// a service to be aware of.
+// Severity may be one of the following, in ascending order of severity:
+// - "serious"
+// - "critical"
+// - "maximum" (equivalently known as "Critical Enforcement")
+type GuardrailStatus struct {
+	Resource string `json:"resource"`
+	Severity string `json:"severity"`
 }
 
 // ErrNoAuth is an error that is returned when the user credentials
@@ -181,6 +194,7 @@ type credsDB struct {
 	tlsConfig               TLSConfig
 	lastHeard               time.Time
 	cacheConfig             CacheConfig
+	guardrailStatuses       []GuardrailStatus
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled
@@ -203,6 +217,7 @@ type Cache struct {
 	ClusterEncryptionConfig ClusterEncryptionConfig `json:"clusterEncryptionConfig"`
 	TLSConfig               tlsConfigImport         `json:"tlsConfig"`
 	CacheConfig             CacheConfig             `json:"cacheConfig"`
+	GuardrailStatuses       []GuardrailStatus       `json:"guardrailStatuses"`
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled if
@@ -495,6 +510,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		clusterEncryptionConfig: c.ClusterEncryptionConfig,
 		tlsConfig:               importTLSConfig(&c.TLSConfig, c.ClientCertAuthState),
 		cacheConfig:             c.CacheConfig,
+		guardrailStatuses:       c.GuardrailStatuses,
 	}
 	return
 }
@@ -749,6 +765,10 @@ func (s *Svc) needConfigRefresh(db *credsDB) uint64 {
 		changes |= CFG_CHANGE_CLUSTER_ENCRYPTION
 	}
 
+	if s.guardrailStatusesChanged(db) {
+		changes |= CFG_CHANGE_GUARDRAIL_STATUSES
+	}
+
 	return changes
 }
 
@@ -768,6 +788,11 @@ func (s *Svc) clientTLSSettingsChanged(db *credsDB) bool {
 	return s.db.clientCertVersion != db.clientCertVersion ||
 		!reflect.DeepEqual(s.db.tlsConfig.ClientPrivateKeyPassphrase,
 			db.tlsConfig.ClientPrivateKeyPassphrase)
+}
+
+func (s *Svc) guardrailStatusesChanged(db *credsDB) bool {
+	return !reflect.DeepEqual(s.db.guardrailStatuses,
+		db.guardrailStatuses)
 }
 
 func fetchDB(s *Svc) *credsDB {
@@ -1302,6 +1327,15 @@ func GetClusterEncryptionConfig(s *Svc) (ClusterEncryptionConfig, error) {
 	}
 
 	return db.clusterEncryptionConfig, nil
+}
+
+// GetGuardrailStatuses returns guardrail statuses.
+func GetGuardrailStatuses(s *Svc) ([]GuardrailStatus, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return []GuardrailStatus{}, staleError(s)
+	}
+	return db.guardrailStatuses, nil
 }
 
 func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig {

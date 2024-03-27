@@ -42,6 +42,8 @@ type TLSRefreshCallback cbauthimpl.TLSRefreshCallback
 const (
 	CFG_CHANGE_CERTS_TLSCONFIG uint64 = 1 << iota
 	CFG_CHANGE_CLUSTER_ENCRYPTION
+	CFG_CHANGE_CLIENT_CERTS_TLSCONFIG
+	CFG_CHANGE_GUARDRAIL_STATUSES
 )
 
 // ConfigRefreshCallback type describes the callback that is called when there is
@@ -55,6 +57,10 @@ type TLSConfig cbauthimpl.TLSConfig
 // ClusterEncryptionConfig contains info about whether to use SSL ports for
 // communication channels and whether to disable non-SSL ports.
 type ClusterEncryptionConfig cbauthimpl.ClusterEncryptionConfig
+
+// GuardrailStatuses contains a list of any currently breached guardrails, with
+// their severities. Only guardrails applicable to the service will be included
+type GuardrailStatuses []cbauthimpl.GuardrailStatus
 
 type BaseAuthenticator interface {
 	// AuthWebCreds method extracts credentials from given http request.
@@ -115,6 +121,7 @@ type Authenticator interface {
 	// - Access documents in any collection in the bucket
 	// - Access collections metadata for any scope in the bucket
 	GetUserBuckets(user, domain string) ([]string, error)
+	GetGuardrailStatuses() (GuardrailStatuses, error)
 }
 
 // Creds type represents credentials and answers queries on this creds
@@ -281,6 +288,11 @@ func (a *authImpl) GetClusterUuid() (string, error) {
 func (a *authImpl) GetUserBuckets(user, domain string) ([]string, error) {
 	bucketsAndPerms, err := cbauthimpl.GetUserBuckets(a.svc, user, domain)
 	return bucketsAndPerms, err
+}
+
+func (a *authImpl) GetGuardrailStatuses() (GuardrailStatuses, error) {
+	cfg, err := cbauthimpl.GetGuardrailStatuses(a.svc)
+	return GuardrailStatuses(cfg), err
 }
 
 var _ Authenticator = (*authImpl)(nil)
