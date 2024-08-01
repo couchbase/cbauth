@@ -136,6 +136,10 @@ type Manager interface {
 	StartTopologyChange(change TopologyChange) error
 }
 
+type InfoManager interface {
+	GetParams() *map[string]interface{}
+}
+
 type AutofailoverManager interface {
 	// returns HealthInfo if the service considers itself overall
 	// healthy and error otherwise
