@@ -145,3 +145,31 @@ func BenchmarkFetchDB_RWMeasureWriter(b *testing.B) {
 		})
 	}
 }
+
+func TestMatchHost(t *testing.T) {
+	tests := []struct {
+		name  string
+		node  Node
+		host  string
+		match bool
+	}{
+		{name: "Hostname", host: "foo.local", node: Node{Host: "foo.local"}, match: true},
+		{name: "DifferentHostname", host: "foo.local", node: Node{Host: "bar.local"}},
+		{name: "IP", host: "199.193.192.229", node: Node{Host: "199.193.192.229"}, match: true},
+		{name: "DifferentIP", host: "151.101.64.81", node: Node{Host: "199.193.192.229"}},
+		{name: "HostnameIP", host: "151.101.64.81", node: Node{Host: "test.local"}},
+		{name: "IPHostname", host: "test.local", node: Node{Host: "151.101.64.81"}},
+		{name: "LoopbackIPv4Local", host: "127.0.0.1", node: Node{Host: "foo.local", Local: true}, match: true},
+		{name: "LoopbackIPv4NotLocal", host: "127.0.0.1", node: Node{Host: "foo.local"}},
+		{name: "LoopbackIPv6Local", host: "::1", node: Node{Host: "foo.local", Local: true}, match: true},
+		{name: "LoopbackIPv6NotLocal", host: "::1", node: Node{Host: "foo.local"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if matchHost(test.node, test.host) != test.match {
+				t.Errorf("Expected match %v, got %v", test.match, !test.match)
+			}
+		})
+	}
+}
