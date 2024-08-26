@@ -141,6 +141,8 @@ type Creds interface {
 	// granted for these credentials, but will not log an audit if
 	// it fails.
 	IsAllowedInternal(permission string) (bool, error)
+	// MB-52197: GetBuckets returns buckets "accessible" by the user
+	GetBuckets() ([]string, error)
 }
 
 var _ Creds = (*cbauthimpl.CredsImpl)(nil)
@@ -216,8 +218,16 @@ func (a *authImpl) AuthWebCredsCore(Hdr httpreq.HttpHeader,
 	if onBehalfUser == "" && onBehalfDomain == "" {
 		return cbauthimpl.VerifyPassword(a.svc, user, pwd)
 	}
+
+	extras, err := ExtractOnBehalfExtras(Hdr)
+	if err != nil {
+		return nil, err
+	}
+
+	onBehalfContext := extras["context"]
+
 	return cbauthimpl.VerifyOnBehalf(a.svc, user, pwd,
-		onBehalfUser, onBehalfDomain)
+		onBehalfUser, onBehalfDomain, onBehalfContext)
 }
 
 func (a *authImpl) Auth(user, pwd string) (creds Creds, err error) {
@@ -290,7 +300,7 @@ func (a *authImpl) GetClusterUuid() (string, error) {
 }
 
 func (a *authImpl) GetUserBuckets(user, domain string) ([]string, error) {
-	bucketsAndPerms, err := cbauthimpl.GetUserBuckets(a.svc, user, domain)
+	bucketsAndPerms, err := cbauthimpl.GetUserBuckets(a.svc, user, domain, "")
 	return bucketsAndPerms, err
 }
 
