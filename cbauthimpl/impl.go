@@ -149,6 +149,16 @@ func matchHost(n Node, host string) bool {
 	HostIP := net.ParseIP(host)
 
 	if NodeHostIP.IsLoopback() {
+		// A Go service using the SDK gets its node IPs from
+		// /pools/default/nodeServices.
+		// This provides a blank IP for localhost nodes, which we will see for a
+		// cluster_run. The SDK assigns the IP that it contacted the node on as
+		// the IP for those blank nodes. The Go service will then fetch the
+		// memcached credentials through cbauth, requesting the credentials for
+		// that IP.
+		// To ensure that we are able to provide credentials for that IP, we
+		// assume that any loopback node is possibly the desired node, and rely
+		// on the port check in the calling function to identify the correct one
 		return true
 	}
 	if HostIP.IsLoopback() && n.Local {
