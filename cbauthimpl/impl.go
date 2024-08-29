@@ -148,6 +148,9 @@ func matchHost(n Node, host string) bool {
 	NodeHostIP := net.ParseIP(n.Host)
 	HostIP := net.ParseIP(host)
 
+	if NodeHostIP.IsLoopback() {
+		return true
+	}
 	if HostIP.IsLoopback() && n.Local {
 		return true
 	}
