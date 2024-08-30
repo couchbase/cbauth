@@ -28,6 +28,7 @@ type serviceAPI struct {
 	autofailoverManager AutofailoverManager
 	serverlessManager   ServerlessManager
 	hibernationManager  HibernationManager
+	infoManager         InfoManager
 }
 
 type Void *struct{}
@@ -136,6 +137,18 @@ func (s serviceAPI) StartTopologyChange(req TopologyChange, res *Void) error {
 	return s.mgr.StartTopologyChange(req)
 }
 
+func (s serviceAPI) GetParams(Void, res *map[string]interface{}) error {
+	if s.infoManager == nil {
+		// it's allowed not to implement this
+		*res = map[string]interface{}{}
+		return nil
+	}
+
+	params := s.infoManager.GetParams()
+	*res = *params
+	return nil
+}
+
 func (s serviceAPI) HealthCheck(Void, res *HealthInfo) error {
 	if s.autofailoverManager == nil {
 		return errors.New("AutofailoverManager is not implemented")
@@ -229,11 +242,12 @@ func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 	autofailoverManager, _ := mgr.(AutofailoverManager)
 	serverlessManager, _ := mgr.(ServerlessManager)
 	hibernationManager, _ := mgr.(HibernationManager)
+	infoManager, _ := mgr.(InfoManager)
 
 	setup := func(rpc *rpc.Server) error {
 		return rpc.RegisterName("ServiceAPI",
 			&serviceAPI{mgr, autofailoverManager, serverlessManager,
-				hibernationManager})
+				hibernationManager, infoManager})
 	}
 
 	return revrpc.BabysitService(setup, service, errorPolicy)
