@@ -65,25 +65,3 @@ func ExtractOnBehalfIdentityGeneric(hdr httpreq.HttpHeader) (user string,
 	}
 	return extractBase64Pair(onBehalf)
 }
-
-func ExtractOnBehalfExtras(hdr httpreq.HttpHeader) (map[string]string, error) {
-	m := make(map[string]string)
-	onBehalfExtras := hdr.Get("cb-on-behalf-extras")
-	if onBehalfExtras == "" {
-		return m, nil
-	}
-
-	// Extras contain key-value pairs (k1:v1;k2:v2;...).
-	decoded, err := base64.StdEncoding.DecodeString(onBehalfExtras)
-	if err != nil {
-		return m, err
-	}
-
-	tokens := strings.Split(string(decoded), ";")
-	for _, e := range tokens {
-		parts := strings.Split(e, ":")
-		m[parts[0]] = parts[1]
-	}
-
-	return m, nil
-}
