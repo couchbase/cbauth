@@ -242,7 +242,7 @@ type Void *struct{}
 type CredsImpl struct {
 	name    string
 	domain  string
-	context string
+	extras  string
 	s       *Svc
 }
 
@@ -276,17 +276,17 @@ func (c *CredsImpl) User() (name, domain string) {
 // IsAllowed method returns true if the permission is granted
 // for these credentials
 func (c *CredsImpl) IsAllowed(permission string) (bool, error) {
-	return checkPermission(c.s, c.name, c.domain, c.context, permission, true)
+	return checkPermission(c.s, c.name, c.domain, c.extras, permission, true)
 }
 
 // IsAllowedInternal method returns true if the permission is
 // granted for these credentials
 func (c *CredsImpl) IsAllowedInternal(permission string) (bool, error) {
-	return checkPermission(c.s, c.name, c.domain, c.context, permission, false)
+	return checkPermission(c.s, c.name, c.domain, c.extras, permission, false)
 }
 
 func (c *CredsImpl) GetBuckets() ([]string, error) {
-	return GetUserBuckets(c.s, c.name, c.domain, c.context)
+	return GetUserBuckets(c.s, c.name, c.domain, c.extras)
 }
 
 func verifySpecialCreds(db *credsDB, user, password string) bool {
@@ -870,7 +870,7 @@ func verifyPasswordOnServer(s *Svc, user, password string) (*CredsImpl, error) {
 
 // VerifyOnBehalf authenticates http request with on behalf header
 func VerifyOnBehalf(s *Svc, user, password, onBehalfUser,
-	onBehalfDomain string, onBehalfContext string) (*CredsImpl, error) {
+	onBehalfDomain string, onBehalfExtras string) (*CredsImpl, error) {
 
 	creds, err := VerifyPassword(s, user, password)
 	if err != nil {
@@ -887,7 +887,7 @@ func VerifyOnBehalf(s *Svc, user, password, onBehalfUser,
 			name:    onBehalfUser,
 			s:       s,
 			domain:  onBehalfDomain,
-			context: onBehalfContext}, nil
+			extras:  onBehalfExtras}, nil
 	}
 	return nil, ErrNoAuth
 }
@@ -983,7 +983,7 @@ type ReqParams struct {
 	url          string
 	user         string
 	domain       string
-	context      string
+	extras       string
 	service      string
 	permission   string
 	audit        bool
@@ -1014,8 +1014,8 @@ func getFromServer(s *Svc, db *credsDB, params *ReqParams) (interface{}, error) 
 	if params.permission != "" {
 		v.Set("permission", params.permission)
 	}
-	if params.context != "" {
-		v.Set("context", params.context)
+	if params.extras != "" {
+		v.Set("extras", params.extras)
 	}
 	maybeSetClusterUUID(s, &v)
 	req.URL.RawQuery = v.Encode()
@@ -1160,7 +1160,7 @@ type userBuckets struct {
 	domain  string
 }
 
-func GetUserBuckets(s *Svc, user, domain, context string) ([]string, error) {
+func GetUserBuckets(s *Svc, user, domain, extras string) ([]string, error) {
 	var bucketAndPerms = []string{}
 
 	db := fetchDB(s)
@@ -1173,7 +1173,7 @@ func GetUserBuckets(s *Svc, user, domain, context string) ([]string, error) {
 		url:          db.userBucketsURL,
 		user:         user,
 		domain:       domain,
-		context:      context,
+		extras:       extras,
 		audit:        true,
 	}
 
@@ -1203,7 +1203,7 @@ type userPermission struct {
 	permission string
 }
 
-func checkPermission(s *Svc, user, domain, context, permission string, audit bool) (bool, error) {
+func checkPermission(s *Svc, user, domain, extras, permission string, audit bool) (bool, error) {
 	allowed := false
 
 	db := fetchDB(s)
@@ -1216,7 +1216,7 @@ func checkPermission(s *Svc, user, domain, context, permission string, audit boo
 		url:          db.permissionCheckURL,
 		user:         user,
 		domain:       domain,
-		context:      context,
+		extras:       extras,
 		permission:   permission,
 		audit:        audit,
 	}

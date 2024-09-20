@@ -219,15 +219,8 @@ func (a *authImpl) AuthWebCredsCore(Hdr httpreq.HttpHeader,
 		return cbauthimpl.VerifyPassword(a.svc, user, pwd)
 	}
 
-	extras, err := ExtractOnBehalfExtras(Hdr)
-	if err != nil {
-		return nil, err
-	}
-
-	onBehalfContext := extras["context"]
-
 	return cbauthimpl.VerifyOnBehalf(a.svc, user, pwd,
-		onBehalfUser, onBehalfDomain, onBehalfContext)
+		onBehalfUser, onBehalfDomain, Hdr.Get("cb-on-behalf-extras"))
 }
 
 func (a *authImpl) Auth(user, pwd string) (creds Creds, err error) {
