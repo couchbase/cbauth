@@ -72,6 +72,7 @@ type TLSConfig struct {
 	CipherSuiteOpenSSLNames    []string
 	PreferServerCipherSuites   bool
 	ClientAuthType             tls.ClientAuthType
+	ShouldClientsUseClientCert bool
 	present                    bool
 	PrivateKeyPassphrase       []byte
 	ClientPrivateKeyPassphrase []byte
@@ -808,6 +809,8 @@ func (s *Svc) serverTLSSettingsChanged(db *credsDB) bool {
 
 func (s *Svc) clientTLSSettingsChanged(db *credsDB) bool {
 	return s.db.clientCertVersion != db.clientCertVersion ||
+		s.db.tlsConfig.ShouldClientsUseClientCert !=
+			db.tlsConfig.ShouldClientsUseClientCert ||
 		!reflect.DeepEqual(s.db.tlsConfig.ClientPrivateKeyPassphrase,
 			db.tlsConfig.ClientPrivateKeyPassphrase)
 }
@@ -1380,6 +1383,9 @@ func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig
 		CipherSuiteOpenSSLNames:    append([]string{}, cfg.CipherOpenSSLNames...),
 		PreferServerCipherSuites:   cfg.CipherOrder,
 		ClientAuthType:             getAuthType(ClientCertAuthState),
+		ShouldClientsUseClientCert:
+			ClientCertAuthState == "hybrid" ||
+			ClientCertAuthState == "mandatory",
 		present:                    cfg.Present,
 		PrivateKeyPassphrase:       cfg.PrivateKeyPassphrase,
 		ClientPrivateKeyPassphrase: cfg.ClientPrivateKeyPassphrase,
@@ -1419,7 +1425,7 @@ func minTLSVersion(str string) uint16 {
 }
 
 func getAuthType(state string) tls.ClientAuthType {
-	if state == "enable" {
+	if state == "enable" || state == "hybrid" {
 		return tls.VerifyClientCertIfGiven
 	} else if state == "mandatory" {
 		return tls.RequireAndVerifyClientCert
