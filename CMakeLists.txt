@@ -7,3 +7,5 @@ GoModBuild(TARGET saslauthd-port
           PACKAGE github.com/couchbase/cbauth/cmd/saslauthd-port
           GOVERSION SUPPORTED_NEWER
           INSTALL_PATH bin)
+
+GoModTidySetup()
