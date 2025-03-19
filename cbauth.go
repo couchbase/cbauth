@@ -143,6 +143,10 @@ type Creds interface {
 	IsAllowedInternal(permission string) (bool, error)
 	// MB-52197: GetBuckets returns buckets "accessible" by the user
 	GetBuckets() ([]string, error)
+	// Expiry time in Unix timestamp format, or 0 if no expiry
+	Expiry() int64
+	// Extras returns the raw extras string (for JWT)
+	Extras() string
 }
 
 var _ Creds = (*cbauthimpl.CredsImpl)(nil)
@@ -172,6 +176,9 @@ var ErrNoAuth = cbauthimpl.ErrNoAuth
 // empty
 var ErrNoUuid = cbauthimpl.ErrNoUuid
 
+// ErrCredentialsExpired is returned when credentials have expired
+var ErrCredentialsExpired = cbauthimpl.ErrCredentialsExpired
+
 // UnknownHostPortError is returned from GetMemcachedServiceAuth and
 // GetHTTPServiceAuth calls for unknown host:port arguments.
 type UnknownHostPortError string
@@ -192,6 +199,11 @@ func (a *authImpl) AuthWebCredsGeneric(req httpreq.HttpRequest) (creds Creds,
 
 func (a *authImpl) AuthWebCredsCore(Hdr httpreq.HttpHeader,
 	TLSState *tls.ConnectionState) (creds Creds, err error) {
+	if cbauthimpl.IsJwtPresent(Hdr) {
+		// MB-66014: _cbauth endpoints don't use HTTPS
+		return cbauthimpl.VerifyOnServer(a.svc, Hdr)
+	}
+
 	if cbauthimpl.IsAuthTokenPresent(Hdr) {
 		return cbauthimpl.VerifyOnServer(a.svc, Hdr)
 	}

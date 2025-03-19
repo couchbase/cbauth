@@ -22,6 +22,7 @@ import (
 	"crypto/md5"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -130,8 +131,17 @@ var ErrCallbackAlreadyRegistered = errors.New("Certificate refresh callback is a
 // ErrUserNotFound is used to signal when username can't be extracted from client certificate.
 var ErrUserNotFound = errors.New("Username not found")
 
-const uaCbauthSuffix = "cbauth"
-const uaCbauthVersion = ""
+// ErrCredentialsExpired is returned when credentials have expired
+var ErrCredentialsExpired = errors.New("Credentials have expired")
+
+const (
+	uaCbauthSuffix  = "cbauth"
+	uaCbauthVersion = ""
+
+	// gregorianToUnixEpochSeconds represents the number of seconds between
+	// Gregorian year 0 and Unix epoch (1970-01-01)
+	gregorianToUnixEpochSeconds int64 = 62167219200
+)
 
 var userAgent = utils.MakeUserAgent(uaCbauthSuffix, uaCbauthVersion)
 
@@ -251,10 +261,11 @@ type Void *struct{}
 
 // CredsImpl implements cbauth.Creds interface.
 type CredsImpl struct {
-	name    string
-	domain  string
-	extras  string
-	s       *Svc
+	name   string
+	domain string
+	extras string
+	expiry int64
+	s      *Svc
 }
 
 type CacheStats struct {
@@ -284,20 +295,50 @@ func (c *CredsImpl) User() (name, domain string) {
 	return c.name, c.domain
 }
 
+// checkExpiry verifies if the credentials have expired
+func (c *CredsImpl) checkExpiry() error {
+	if expiry := c.Expiry(); expiry > 0 {
+		now := time.Now().Unix()
+		if now > expiry {
+			return ErrCredentialsExpired
+		}
+	}
+	return nil
+}
+
 // IsAllowed method returns true if the permission is granted
 // for these credentials
 func (c *CredsImpl) IsAllowed(permission string) (bool, error) {
+	if err := c.checkExpiry(); err != nil {
+		return false, err
+	}
 	return checkPermission(c.s, c.name, c.domain, c.extras, permission, true)
 }
 
 // IsAllowedInternal method returns true if the permission is
 // granted for these credentials
 func (c *CredsImpl) IsAllowedInternal(permission string) (bool, error) {
+	if err := c.checkExpiry(); err != nil {
+		return false, err
+	}
 	return checkPermission(c.s, c.name, c.domain, c.extras, permission, false)
 }
 
 func (c *CredsImpl) GetBuckets() ([]string, error) {
+	if err := c.checkExpiry(); err != nil {
+		return nil, err
+	}
 	return GetUserBuckets(c.s, c.name, c.domain, c.extras)
+}
+
+// Expiry returns the expiry time in Unix timestamp format, or 0 if no expiry
+func (c *CredsImpl) Expiry() int64 {
+	return c.expiry
+}
+
+// Extras returns the raw extras string (additional authentication context)
+func (c *CredsImpl) Extras() string {
+	return c.extras
 }
 
 func verifySpecialCreds(db *credsDB, user, password string) bool {
@@ -860,6 +901,16 @@ func IsAuthTokenPresent(Hdr httpreq.HttpHeader) bool {
 	return Hdr.Get(tokenHeader) == "yes"
 }
 
+func IsJwtPresent(Hdr httpreq.HttpHeader) bool {
+	authHeader := Hdr.Get("Authorization")
+
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		return len(token) > 0
+	}
+	return false
+}
+
 func copyHeader(name string, from httpreq.HttpHeader, to http.Header) {
 	if val := from.Get(name); val != "" {
 		to.Set(name, val)
@@ -881,6 +932,25 @@ func verifyPasswordOnServer(s *Svc, user, password string) (*CredsImpl, error) {
 	return VerifyOnServer(s, req.Header)
 }
 
+// computeExpiryFromExtras parses the expiry value from extras string and
+// converts it from Gregorian seconds to Unix epoch seconds.
+func computeExpiryFromExtras(extras string) int64 {
+	if extras == "" {
+		return 0
+	}
+	pairs := strings.Split(extras, ";")
+	for _, pair := range pairs {
+		if strings.HasPrefix(pair, "expiry=") {
+			raw := strings.TrimPrefix(pair, "expiry=")
+			gSecs, err := strconv.ParseInt(raw, 10, 64)
+			if err == nil {
+				return gSecs - gregorianToUnixEpochSeconds
+			}
+		}
+	}
+	return 0
+}
+
 // VerifyOnBehalf authenticates http request with on behalf header
 func VerifyOnBehalf(s *Svc, user, password, onBehalfUser,
 	onBehalfDomain string, onBehalfExtras string) (*CredsImpl, error) {
@@ -896,11 +966,22 @@ func VerifyOnBehalf(s *Svc, user, password, onBehalfUser,
 		return nil, err
 	}
 	if allowed {
+		var decodedExtras string
+		if onBehalfExtras != "" {
+			decoded, err := base64.StdEncoding.DecodeString(
+				onBehalfExtras)
+			if err != nil {
+				return nil, fmt.Errorf("Failed to decode "+
+					"extras: %v", err)
+			}
+			decodedExtras = string(decoded)
+		}
 		return &CredsImpl{
-			name:    onBehalfUser,
-			s:       s,
-			domain:  onBehalfDomain,
-			extras:  onBehalfExtras}, nil
+			name:   onBehalfUser,
+			s:      s,
+			domain: onBehalfDomain,
+			extras: decodedExtras,
+			expiry: computeExpiryFromExtras(decodedExtras)}, nil
 	}
 	return nil, ErrNoAuth
 }
@@ -967,14 +1048,22 @@ func executeReqAndGetCreds(s *Svc, req *http.Request) (*CredsImpl, error) {
 	}
 
 	resp := struct {
-		User, Domain string
+		User   string `json:"user"`
+		Domain string `json:"domain"`
+		Extras string `json:"extras"`
 	}{}
 	err = json.Unmarshal(body, &resp)
 	if err != nil {
 		return nil, err
 	}
 
-	rv := CredsImpl{name: resp.User, domain: resp.Domain, s: s}
+	rv := CredsImpl{
+		name:   resp.User,
+		domain: resp.Domain,
+		extras: resp.Extras,
+		expiry: computeExpiryFromExtras(resp.Extras),
+		s:      s,
+	}
 	return &rv, nil
 }
 
@@ -1027,8 +1116,13 @@ func getFromServer(s *Svc, db *credsDB, params *ReqParams) (interface{}, error) 
 	if params.permission != "" {
 		v.Set("permission", params.permission)
 	}
+	// extras contains "(groups=...;roles=...;)expiry=..." for JWT and SAML
+	// authenticated users. This needs to be encoded in base64 because it
+	// contains special characters.
 	if params.extras != "" {
-		v.Set("extras", params.extras)
+		encoded := base64.StdEncoding.EncodeToString([]byte(
+			params.extras))
+		v.Set("extras", encoded)
 	}
 	maybeSetClusterUUID(s, &v)
 	req.URL.RawQuery = v.Encode()
