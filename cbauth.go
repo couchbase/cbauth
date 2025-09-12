@@ -91,6 +91,7 @@ type ExternalAuthenticator interface {
 // and outgoing auth.
 type Authenticator interface {
 	BaseAuthenticator
+	EncryptionKeys
 	GetHTTPServiceAuth(hostport string) (user, pwd string, err error)
 	// GetMemcachedServiceAuth returns user/password creds given
 	// "admin" access to given memcached service.
@@ -323,3 +324,44 @@ func (a *authImpl) GetGuardrailStatuses() (GuardrailStatuses, error) {
 }
 
 var _ Authenticator = (*authImpl)(nil)
+
+type KeyDataType cbauthimpl.KeyDataType
+type EncrKeysInfo cbauthimpl.EncrKeysInfo
+
+type RefreshKeysCallback func(KeyDataType) error
+type GetInUseKeysCallback func(KeyDataType) ([]string, error)
+type DropKeysCallback func(KeyDataType, []string)
+
+type EncryptionKeys interface {
+	RegisterEncryptionKeysCallbacks(RefreshKeysCallback, GetInUseKeysCallback, DropKeysCallback) error
+	GetEncryptionKeys(KeyDataType) (*EncrKeysInfo, error)
+	KeysDropComplete(KeyDataType, error) error
+}
+
+func (a *authImpl) RegisterEncryptionKeysCallbacks(refreshKeysCallback RefreshKeysCallback, getInUseKeysCallback GetInUseKeysCallback, dropKeysCallback DropKeysCallback) error {
+	return cbauthimpl.RegisterEncryptionKeysCallbacks(a.svc,
+		func(keyType cbauthimpl.KeyDataType) error {
+			return refreshKeysCallback(KeyDataType(keyType))
+		},
+		func(keyType cbauthimpl.KeyDataType) ([]string, error) {
+			return getInUseKeysCallback(KeyDataType(keyType))
+		},
+		func(keyType cbauthimpl.KeyDataType, keys []string) {
+			dropKeysCallback(KeyDataType(keyType), keys)
+		})
+}
+
+func (a *authImpl) GetEncryptionKeys(key KeyDataType) (*EncrKeysInfo, error) {
+	res, err := cbauthimpl.GetEncryptionKeys(a.svc, cbauthimpl.KeyDataType(key))
+	return (*EncrKeysInfo)(res), err
+}
+
+// It is fine if this call fails. Ns_server may retry to drop keys again,
+// and that time KeysDropComplete should be called again.
+// If key drop is successful, dropErr must be nil. If key drop is not
+// successful, dropErr must contains the error description.
+func (a *authImpl) KeysDropComplete(key KeyDataType, dropErr error) error {
+	return cbauthimpl.KeysDropComplete(a.svc, cbauthimpl.KeyDataType(key), dropErr)
+}
+
+var _ EncryptionKeys = (*authImpl)(nil)

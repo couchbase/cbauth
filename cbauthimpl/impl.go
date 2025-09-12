@@ -124,8 +124,8 @@ var ErrNoAuth = errors.New("Authentication failure")
 // empty
 var ErrNoUuid = errors.New("No UUID for user")
 
-// ErrCallbackAlreadyRegistered is used to signal that certificate refresh callback is already registered
-var ErrCallbackAlreadyRegistered = errors.New("Certificate refresh callback is already registered")
+// ErrCallbackAlreadyRegistered is used to signal that callback is already registered
+var ErrCallbackAlreadyRegistered = errors.New("Callback is already registered")
 
 // ErrUserNotFound is used to signal when username can't be extracted from client certificate.
 var ErrUserNotFound = errors.New("Username not found")
@@ -202,6 +202,7 @@ type credsDB struct {
 	permissionCheckURL      string
 	uuidCheckURL            string
 	userBucketsURL          string
+	keysDropCompleteURL     string
 	specialUser             string
 	specialPasswords        []string
 	permissionsVersion      string
@@ -225,6 +226,7 @@ type Cache struct {
 	PermissionCheckURL      string `json:"permissionCheckUrl"`
 	UuidCheckURL            string
 	UserBucketsURL          string
+	KeysDropCompleteURL     string   `json:"keysDropCompleteURL"`
 	SpecialUser             string   `json:"specialUser"`
 	SpecialPasswords        []string `json:"specialPasswords"`
 	PermissionsVersion      string
@@ -253,6 +255,46 @@ type CacheExt struct {
 	ClientCertAuthState         string
 	NodeUUID                    string
 	ClusterUUID                 string
+}
+
+type KeyDataType struct {
+	TypeName   string `json:"typeName"`
+	BucketUUID string `json:"bucketUUID"` // UUID is used only when Type is "bucket"
+}
+
+type RefreshKeysCallback func(KeyDataType) error
+type GetInUseKeysCallback func(KeyDataType) ([]string, error)
+type DropKeysCallback func(KeyDataType, []string)
+
+type DropKeysData struct {
+	DataType KeyDataType `json:"dataType"`
+	Keys     []string    `json:"keys"`
+}
+
+type EncrKeysInfo struct {
+	ActiveKeyId       string
+	Keys              []EaRKey
+	UnavailableKeyIds []string
+}
+
+type keysDB struct {
+	encrKeys             map[KeyDataType]*EncrKeysInfo
+	refreshKeysCallback  RefreshKeysCallback
+	getInUseKeysCallback GetInUseKeysCallback
+	dropKeysCallback     DropKeysCallback
+}
+
+type KeysCache struct {
+	DataType          KeyDataType `json:"dataType"`
+	ActiveKeyId       string      `json:"active"`
+	Keys              []EaRKey    `json:"keys"`
+	UnavailableKeyIds []string    `json:"unavailableKeys"`
+}
+
+type EaRKey struct {
+	Id     string `json:"id"`
+	Cipher string `json:"cipher"`
+	Key    []byte `json:"key"`
 }
 
 // Void is a structure that represents empty revrpc payload
@@ -525,6 +567,7 @@ func (n *tlsNotifier) loop() {
 type Svc struct {
 	l                   sync.RWMutex
 	db                  *credsDB
+	keysDb              keysDB
 	staleErr            error
 	freshChan           chan struct{}
 	uuidCache           ReqCache
@@ -561,6 +604,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		permissionCheckURL:      c.PermissionCheckURL,
 		uuidCheckURL:            c.UuidCheckURL,
 		userBucketsURL:          c.UserBucketsURL,
+		keysDropCompleteURL:     c.KeysDropCompleteURL,
 		specialUser:             c.SpecialUser,
 		specialPasswords:        c.SpecialPasswords,
 		permissionsVersion:      c.PermissionsVersion,
@@ -681,6 +725,193 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 		s.tlsNotifier.notifyTLSChange()
 		s.cfgChangeNotifier.notifyCfgChange(cfgChanges)
 	}
+	return nil
+}
+
+func RegisterEncryptionKeysCallbacks(s *Svc, refreshKeysCallback RefreshKeysCallback, getInUseKeysCallback GetInUseKeysCallback, dropKeysCallback DropKeysCallback) error {
+	s.l.Lock()
+	if s.keysDb.refreshKeysCallback != nil {
+		s.l.Unlock()
+		return ErrCallbackAlreadyRegistered
+	}
+	s.keysDb.refreshKeysCallback = refreshKeysCallback
+	s.keysDb.dropKeysCallback = dropKeysCallback
+	s.keysDb.getInUseKeysCallback = getInUseKeysCallback
+
+	dataTypesToNotify := make([]KeyDataType, 0, len(s.keysDb.encrKeys))
+	if s.keysDb.encrKeys != nil {
+		for k := range s.keysDb.encrKeys {
+			dataTypesToNotify = append(dataTypesToNotify, k)
+		}
+	}
+	s.l.Unlock()
+
+	if len(dataTypesToNotify) > 0 {
+		go func() {
+			for _, dataType := range dataTypesToNotify {
+				// Ignoring the return value in this case.
+				// Ns_server theats missing callback as error when handling
+				// key updates. For this reason, it will have to retry the
+				// update anyway and the return value will not be ignored
+				// that time.
+				// Note that strictly speaking, we don't have to call
+				// the callback here (for the same reason - ns_server will retry
+				// the update anyway), but that can slow down the service
+				// as it can wait for the callback to be called.
+				refreshKeysCallback(dataType)
+			}
+		}()
+	}
+	return nil
+}
+
+func (s *Svc) UpdateKeysDB(c *KeysCache, outparam *Void) error {
+	if outparam != nil {
+		*outparam = nil
+	}
+	key, err := normalizedKeyDataType(c.DataType)
+	if err != nil {
+		return err
+	}
+	s.l.Lock()
+	if s.keysDb.encrKeys == nil {
+		s.keysDb.encrKeys = make(map[KeyDataType]*EncrKeysInfo)
+	}
+	updateKeysDBLocked(s.keysDb.encrKeys, key, c)
+	callback := s.keysDb.refreshKeysCallback
+	s.l.Unlock()
+
+	if callback == nil {
+		return errors.New("no callback registered")
+	}
+
+	return callback(key)
+}
+
+func (s *Svc) GetInUseKeys(c *KeyDataType, outparam *[]string) error {
+	if outparam != nil {
+		s.l.RLock()
+		callback := s.keysDb.getInUseKeysCallback
+		s.l.RUnlock()
+
+		if callback == nil {
+			return errors.New("no callback registered")
+		}
+		res, err := callback(*c)
+		if err != nil {
+			return err
+		}
+		*outparam = res
+	}
+	return nil
+}
+
+func (s *Svc) DropKeys(c *DropKeysData, outparam *Void) error {
+	if outparam != nil {
+		*outparam = nil
+	}
+	s.l.RLock()
+	callback := s.keysDb.dropKeysCallback
+	s.l.RUnlock()
+	if callback == nil {
+		return errors.New("no callback registered")
+	}
+	callback(c.DataType, c.Keys)
+	return nil
+}
+
+func updateKeysDBLocked(encrKeys map[KeyDataType]*EncrKeysInfo, key KeyDataType, c *KeysCache) {
+	new := &EncrKeysInfo{
+		ActiveKeyId:       c.ActiveKeyId,
+		Keys:              c.Keys,
+		UnavailableKeyIds: c.UnavailableKeyIds,
+	}
+	encrKeys[key] = new
+}
+
+func GetEncryptionKeys(s *Svc, t KeyDataType) (*EncrKeysInfo, error) {
+	res, err := fetchEncrKeysInfo(s, t)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, fmt.Errorf("no keys found for key type: %v", t)
+	}
+	return res, nil
+}
+
+func normalizedKeyDataType(key KeyDataType) (KeyDataType, error) {
+	bucketUUID := key.BucketUUID
+	if key.TypeName != "bucket" {
+		bucketUUID = ""
+	}
+	switch key.TypeName {
+	case "bucket":
+		if bucketUUID == "" {
+			return KeyDataType{}, fmt.Errorf("bucket uuid is required for bucket key type")
+		}
+	case "config":
+	case "log":
+	case "audit":
+	default:
+		return KeyDataType{}, fmt.Errorf("invalid key type: %s", key.TypeName)
+	}
+	return KeyDataType{TypeName: key.TypeName, BucketUUID: bucketUUID}, nil
+}
+
+func KeysDropComplete(s *Svc, dataType KeyDataType, dropErr error) error {
+	db := fetchDB(s)
+	if db == nil {
+		return staleError(s)
+	}
+
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
+	description := ""
+	if dropErr != nil {
+		description = dropErr.Error()
+	}
+	body := struct {
+		Type        string `json:"type"`
+		BucketUUID  string `json:"bucketUUID"`
+		Success     bool   `json:"success"`
+		Description string `json:"description"`
+	}{
+		Type:        dataType.TypeName,
+		BucketUUID:  dataType.BucketUUID,
+		Success:     dropErr == nil,
+		Description: description,
+	}
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		panic(err)
+	}
+
+	req, err := http.NewRequest("POST", db.keysDropCompleteURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		panic(err)
+	}
+
+	if len(db.specialPasswords) > 0 {
+		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
+	}
+
+	req.Header.Set("User-Agent", userAgent)
+
+	hresp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer hresp.Body.Close()
+	defer io.Copy(io.Discard, hresp.Body)
+
+	if hresp.StatusCode != 204 {
+		err = fmt.Errorf("POST %s returned %d. Expected 204. Body: %s", db.keysDropCompleteURL, hresp.StatusCode, hresp.Body)
+		return err
+	}
+
 	return nil
 }
 
@@ -889,6 +1120,22 @@ func (s *Svc) ifNotExpired(db *credsDB) *credsDB {
 	}
 
 	return db
+}
+
+func fetchEncrKeysInfo(s *Svc, t KeyDataType) (*EncrKeysInfo, error) {
+	normalizedType, err := normalizedKeyDataType(t)
+	if err != nil {
+		return nil, err
+	}
+	s.l.RLock()
+	defer s.l.RUnlock()
+	if s.keysDb.encrKeys == nil {
+		return nil, nil
+	}
+	if keysInfo := s.keysDb.encrKeys[normalizedType]; keysInfo != nil {
+		return keysInfo, nil
+	}
+	return nil, nil
 }
 
 const tokenHeader = "ns-server-ui"

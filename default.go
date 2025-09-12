@@ -373,3 +373,25 @@ func GetTLSConfig() (TLSConfig, error) {
 	}
 	return Default.GetTLSConfig()
 }
+
+func RegisterEncryptionKeysCallbacks(refreshKeysCallback RefreshKeysCallback, getInUseKeysCallback GetInUseKeysCallback, dropKeysCallback DropKeysCallback) error {
+	if Default == nil {
+		return ErrNotInitialized
+	}
+	Default.RegisterEncryptionKeysCallbacks(refreshKeysCallback, getInUseKeysCallback, dropKeysCallback)
+	return nil
+}
+
+func GetEncryptionKeys(key KeyDataType) (*EncrKeysInfo, error) {
+	if Default == nil {
+		return nil, ErrNotInitialized
+	}
+	return Default.GetEncryptionKeys(key)
+}
+
+func KeysDropComplete(key KeyDataType, dropErr error) error {
+	if Default == nil {
+		return ErrNotInitialized
+	}
+	return Default.KeysDropComplete(key, dropErr)
+}
