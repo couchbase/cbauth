@@ -17,6 +17,7 @@
 package cbauth
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net/http"
@@ -335,6 +336,7 @@ type DropKeysCallback func(KeyDataType, []string)
 type EncryptionKeys interface {
 	RegisterEncryptionKeysCallbacks(RefreshKeysCallback, GetInUseKeysCallback, DropKeysCallback) error
 	GetEncryptionKeys(KeyDataType) (*EncrKeysInfo, error)
+	GetEncryptionKeysBlocking(context.Context, KeyDataType) (*EncrKeysInfo, error)
 	KeysDropComplete(KeyDataType, error) error
 }
 
@@ -353,6 +355,11 @@ func (a *authImpl) RegisterEncryptionKeysCallbacks(refreshKeysCallback RefreshKe
 
 func (a *authImpl) GetEncryptionKeys(key KeyDataType) (*EncrKeysInfo, error) {
 	res, err := cbauthimpl.GetEncryptionKeys(a.svc, cbauthimpl.KeyDataType(key))
+	return (*EncrKeysInfo)(res), err
+}
+
+func (a *authImpl) GetEncryptionKeysBlocking(ctx context.Context, key KeyDataType) (*EncrKeysInfo, error) {
+	res, err := cbauthimpl.GetEncryptionKeysBlocking(ctx, a.svc, cbauthimpl.KeyDataType(key))
 	return (*EncrKeysInfo)(res), err
 }
 

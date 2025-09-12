@@ -16,6 +16,7 @@
 package cbauth
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -394,4 +395,11 @@ func KeysDropComplete(key KeyDataType, dropErr error) error {
 		return ErrNotInitialized
 	}
 	return Default.KeysDropComplete(key, dropErr)
+}
+
+func GetEncryptionKeysBlocking(ctx context.Context, key KeyDataType) (*EncrKeysInfo, error) {
+	if Default == nil {
+		return nil, ErrNotInitialized
+	}
+	return Default.GetEncryptionKeysBlocking(ctx, key)
 }

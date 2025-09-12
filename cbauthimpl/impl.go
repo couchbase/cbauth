@@ -19,6 +19,7 @@ package cbauthimpl
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"crypto/tls"
 	"crypto/x509"
@@ -282,6 +283,7 @@ type keysDB struct {
 	refreshKeysCallback  RefreshKeysCallback
 	getInUseKeysCallback GetInUseKeysCallback
 	dropKeysCallback     DropKeysCallback
+	updateKeysCh         chan struct{} // Channel to signal when UpdateKeysDB is called
 }
 
 type KeysCache struct {
@@ -779,6 +781,11 @@ func (s *Svc) UpdateKeysDB(c *KeysCache, outparam *Void) error {
 	}
 	updateKeysDBLocked(s.keysDb.encrKeys, key, c)
 	callback := s.keysDb.refreshKeysCallback
+	if s.keysDb.updateKeysCh != nil {
+		// Signal all waiting GetEncryptionKeysBlocking calls
+		close(s.keysDb.updateKeysCh)
+		s.keysDb.updateKeysCh = nil // Reset for next time
+	}
 	s.l.Unlock()
 
 	if callback == nil {
@@ -830,7 +837,7 @@ func updateKeysDBLocked(encrKeys map[KeyDataType]*EncrKeysInfo, key KeyDataType,
 }
 
 func GetEncryptionKeys(s *Svc, t KeyDataType) (*EncrKeysInfo, error) {
-	res, err := fetchEncrKeysInfo(s, t)
+	res, _, err := fetchEncrKeysInfo(s, t, false)
 	if err != nil {
 		return nil, err
 	}
@@ -857,6 +864,31 @@ func normalizedKeyDataType(key KeyDataType) (KeyDataType, error) {
 		return KeyDataType{}, fmt.Errorf("invalid key type: %s", key.TypeName)
 	}
 	return KeyDataType{TypeName: key.TypeName, BucketUUID: bucketUUID}, nil
+}
+
+// GetEncryptionKeysBlocking blocks until UpdateKeysDB is called and the specific
+// keys are available, or the context is cancelled/times out.
+func GetEncryptionKeysBlocking(ctx context.Context, s *Svc, t KeyDataType) (*EncrKeysInfo, error) {
+
+	for {
+		// First try to get the keys immediately
+		res, updateKeysCh, err := fetchEncrKeysInfo(s, t, true)
+		if err != nil {
+			return nil, err
+		}
+		if res != nil {
+			return res, nil
+		}
+
+		// Wait for the channel to be closed (UpdateKeysDB called)
+		select {
+		case <-updateKeysCh:
+			// UpdateKeysDB was called, loop back to check keys again
+			continue
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }
 
 func KeysDropComplete(s *Svc, dataType KeyDataType, dropErr error) error {
@@ -992,6 +1024,9 @@ func NewSVCForTest(period time.Duration, staleErr error, waitfn func(time.Durati
 		heartbeatWait:     0,
 	}
 
+	// Initialize the updateKeysCh for blocking GetEncryptionKeys
+	s.keysDb.updateKeysCh = nil
+
 	dt, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
 		panic("http.DefaultTransport not an *http.Transport")
@@ -1122,20 +1157,28 @@ func (s *Svc) ifNotExpired(db *credsDB) *credsDB {
 	return db
 }
 
-func fetchEncrKeysInfo(s *Svc, t KeyDataType) (*EncrKeysInfo, error) {
+func fetchEncrKeysInfo(s *Svc, t KeyDataType, needWaitCh bool) (*EncrKeysInfo, chan struct{}, error) {
 	normalizedType, err := normalizedKeyDataType(t)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	s.l.RLock()
-	defer s.l.RUnlock()
-	if s.keysDb.encrKeys == nil {
-		return nil, nil
+	s.l.Lock() // Can't use RLock because we need to create the update channel if it doesn't exist
+	defer s.l.Unlock()
+
+	if s.keysDb.encrKeys != nil {
+		if keysInfo := s.keysDb.encrKeys[normalizedType]; keysInfo != nil {
+			return keysInfo, nil, nil
+		}
 	}
-	if keysInfo := s.keysDb.encrKeys[normalizedType]; keysInfo != nil {
-		return keysInfo, nil
+
+	if needWaitCh {
+		if s.keysDb.updateKeysCh == nil {
+			s.keysDb.updateKeysCh = make(chan struct{})
+		}
+		return nil, s.keysDb.updateKeysCh, nil
 	}
-	return nil, nil
+
+	return nil, nil, nil
 }
 
 const tokenHeader = "ns-server-ui"
