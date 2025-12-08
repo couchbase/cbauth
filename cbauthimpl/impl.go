@@ -105,7 +105,6 @@ type CacheConfig struct {
 	ClientCertCacheSize int `json:"clientCertCacheSize"`
 }
 
-
 // GuardrailStatus contains the current status for a resource that we want
 // a service to be aware of.
 // Severity may be one of the following, in ascending order of severity:
@@ -1375,9 +1374,9 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 
 	if verifySpecialCreds(db, user, password) {
 		return &CredsImpl{
-			name:     user,
-			s:        s,
-			domain:   "admin"}, nil
+			name:   user,
+			s:      s,
+			domain: "admin"}, nil
 	}
 
 	cacheSize := db.cacheConfig.AuthCacheSize
@@ -1393,9 +1392,9 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 	if found {
 		identity := id.(userIdentity)
 		return &CredsImpl{
-			name:     identity.user,
-			s:        s,
-			domain:   identity.domain}, nil
+			name:   identity.user,
+			s:      s,
+			domain: identity.domain}, nil
 	}
 
 	rv, err := verifyPasswordOnServer(s, user, password)
@@ -1471,14 +1470,13 @@ func GetGuardrailStatuses(s *Svc) ([]GuardrailStatus, error) {
 
 func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig {
 	return TLSConfig{
-		MinVersion:                 minTLSVersion(cfg.MinTLSVersion),
-		CipherSuites:               append([]uint16{}, cfg.Ciphers...),
-		CipherSuiteNames:           append([]string{}, cfg.CipherNames...),
-		CipherSuiteOpenSSLNames:    append([]string{}, cfg.CipherOpenSSLNames...),
-		PreferServerCipherSuites:   cfg.CipherOrder,
-		ClientAuthType:             getAuthType(ClientCertAuthState),
-		ShouldClientsUseClientCert:
-			ClientCertAuthState == "hybrid" ||
+		MinVersion:               minTLSVersion(cfg.MinTLSVersion),
+		CipherSuites:             append([]uint16{}, cfg.Ciphers...),
+		CipherSuiteNames:         append([]string{}, cfg.CipherNames...),
+		CipherSuiteOpenSSLNames:  append([]string{}, cfg.CipherOpenSSLNames...),
+		PreferServerCipherSuites: cfg.CipherOrder,
+		ClientAuthType:           getAuthType(ClientCertAuthState),
+		ShouldClientsUseClientCert: ClientCertAuthState == "hybrid" ||
 			ClientCertAuthState == "mandatory",
 		present:                    cfg.Present,
 		PrivateKeyPassphrase:       cfg.PrivateKeyPassphrase,
