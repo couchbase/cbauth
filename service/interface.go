@@ -181,3 +181,32 @@ type HibernationManager interface {
 	PrepareResume(params ResumeParams) error
 	Resume(params ResumeParams) error
 }
+
+type BucketConfigParams struct {
+	Config string `json:"config"`
+}
+
+type BucketConfigValidationSuccess struct {
+	RequiresRestart bool   `json:"requiresRestart"`
+	Value           any    `json:"value"`
+	Visibility      string `json:"visibility"`
+}
+
+type BucketConfigValidationError struct {
+	Error   string `json:"error"`
+	Message string `json:"message"`
+}
+
+type BucketValidationResult struct {
+	// Result should map to the same format given by memcached.
+	// Named and included as a sub-field of the result such that we can add
+	// to this payload if ever we need to in the future.
+	//
+	// The mapped type should be either BucketConfigValidationSuccess or
+	// BucketConfigValidationError.
+	Result map[string]any `json:"validationResult"`
+}
+
+type BucketConfigurationManager interface {
+	ValidateBucketConfig(params BucketConfigParams) (*BucketValidationResult, error)
+}

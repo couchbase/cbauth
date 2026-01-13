@@ -29,6 +29,7 @@ type serviceAPI struct {
 	serverlessManager   ServerlessManager
 	hibernationManager  HibernationManager
 	infoManager         InfoManager
+	bucketConfigManager BucketConfigurationManager
 }
 
 type Void *struct{}
@@ -232,6 +233,22 @@ func (s serviceAPI) Resume(params ResumeParams, res *Void) error {
 	return s.hibernationManager.Resume(params)
 }
 
+func (s serviceAPI) ValidateBucketConfig(params BucketConfigParams, res *BucketValidationResult) error {
+	var result *BucketValidationResult
+	var err error
+
+	if s.bucketConfigManager == nil {
+		return errors.New("BucketConfigurationManager is not implemented")
+	}
+	result, err = s.bucketConfigManager.ValidateBucketConfig(params)
+
+	if err == nil {
+		*res = *result
+	}
+
+	return err
+}
+
 func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 
 	service, err := revrpc.GetDefaultServiceFromEnv("service_api")
@@ -243,11 +260,12 @@ func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 	serverlessManager, _ := mgr.(ServerlessManager)
 	hibernationManager, _ := mgr.(HibernationManager)
 	infoManager, _ := mgr.(InfoManager)
+	bucketConfigManager, _ := mgr.(BucketConfigurationManager)
 
 	setup := func(rpc *rpc.Server) error {
 		return rpc.RegisterName("ServiceAPI",
 			&serviceAPI{mgr, autofailoverManager, serverlessManager,
-				hibernationManager, infoManager})
+				hibernationManager, infoManager, bucketConfigManager})
 	}
 
 	return revrpc.BabysitService(setup, service, errorPolicy)
