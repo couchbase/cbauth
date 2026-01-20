@@ -277,6 +277,7 @@ type EncrKeysInfo struct {
 	ActiveKeyId       string
 	Keys              []EaRKey
 	UnavailableKeyIds []string
+	Path              string // Where encrypted keys are stored
 }
 
 type keysDB struct {
@@ -293,6 +294,7 @@ type KeysCache struct {
 	ActiveKeyId       string      `json:"active"`
 	Keys              []EaRKey    `json:"keys"`
 	UnavailableKeyIds []string    `json:"unavailableKeys"`
+	Path              string      `json:"path"`
 }
 
 type EaRKey struct {
@@ -852,6 +854,7 @@ func updateKeysDBLocked(encrKeys map[KeyDataType]*EncrKeysInfo, key KeyDataType,
 		ActiveKeyId:       c.ActiveKeyId,
 		Keys:              c.Keys,
 		UnavailableKeyIds: c.UnavailableKeyIds,
+		Path:              c.Path,
 	}
 	encrKeys[key] = new
 }
