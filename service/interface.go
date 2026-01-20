@@ -208,5 +208,5 @@ type BucketValidationResult struct {
 }
 
 type BucketConfigurationManager interface {
-	ValidateBucketConfig(params BucketConfigParams) (*BucketValidationResult, error)
+	ValidateBucketConfig(params map[string]string) (*BucketValidationResult, error)
 }

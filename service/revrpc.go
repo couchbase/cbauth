@@ -17,6 +17,7 @@ package service
 import (
 	"errors"
 	"net/rpc"
+	"strings"
 	"sync"
 	"time"
 
@@ -233,6 +234,81 @@ func (s serviceAPI) Resume(params ResumeParams, res *Void) error {
 	return s.hibernationManager.Resume(params)
 }
 
+// trimRightUntil trims contiguous runes in 'cutset' from the right of 's' stopping if 's' drops below 'n' runes long.
+func trimRightUntil(s []rune, cutset []rune, n int) []rune {
+	inCutset := func(c rune) bool {
+		for _, cut := range cutset {
+			if c == cut {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	for len(s) > 0 && len(s) > n {
+		if !inCutset(s[len(s)-1]) {
+			break
+		}
+
+		s = s[0 : len(s)-1]
+	}
+
+	return s
+}
+
+// takeUntil grabs characters until it finds an unescaped 'separator'. The return value is stripped of (unescaped)
+// spaces.
+func takeUntil(src string, separator rune) (string, string) {
+	const whitespace = "\r\n\t "
+
+	src = strings.TrimLeft(src, whitespace)
+
+	var (
+		runes  = []rune(src)
+		escape = false
+		res    = make([]rune, 0, len(src))
+
+		i           int
+		lastEscaped int
+	)
+
+	for i = 0; i < len(src); i++ {
+		char := runes[i]
+		if !escape && char == separator {
+			break
+		}
+
+		if char == '\\' {
+			lastEscaped = len(res) + 1
+			escape = true
+		} else {
+			res = append(res, char)
+			escape = false
+		}
+	}
+
+	s := string(trimRightUntil(res, []rune(whitespace), lastEscaped))
+	if i >= len(src)-1 {
+		return s, ""
+	}
+
+	return s, string([]rune(src)[i+1:])
+}
+
+func parseConfig(cfg string) map[string]string {
+	res := make(map[string]string, 0)
+
+	for len(cfg) > 0 {
+		var key, value string
+		key, cfg = takeUntil(cfg, '=')
+		value, cfg = takeUntil(cfg, ';')
+		res[key] = value
+	}
+
+	return res
+}
+
 func (s serviceAPI) ValidateBucketConfig(params BucketConfigParams, res *BucketValidationResult) error {
 	var result *BucketValidationResult
 	var err error
@@ -240,8 +316,10 @@ func (s serviceAPI) ValidateBucketConfig(params BucketConfigParams, res *BucketV
 	if s.bucketConfigManager == nil {
 		return errors.New("BucketConfigurationManager is not implemented")
 	}
-	result, err = s.bucketConfigManager.ValidateBucketConfig(params)
 
+	cfg := parseConfig(params.Config)
+
+	result, err = s.bucketConfigManager.ValidateBucketConfig(cfg)
 	if err == nil {
 		*res = *result
 	}
