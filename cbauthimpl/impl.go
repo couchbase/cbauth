@@ -266,6 +266,7 @@ type KeyDataType struct {
 type RefreshKeysCallback func(KeyDataType) error
 type GetInUseKeysCallback func(KeyDataType) ([]string, error)
 type DropKeysCallback func(KeyDataType, []string)
+type SynchronizeKeyFilesCallback func(KeyDataType) error
 
 type DropKeysData struct {
 	DataType KeyDataType `json:"dataType"`
@@ -279,11 +280,12 @@ type EncrKeysInfo struct {
 }
 
 type keysDB struct {
-	encrKeys             map[KeyDataType]*EncrKeysInfo
-	refreshKeysCallback  RefreshKeysCallback
-	getInUseKeysCallback GetInUseKeysCallback
-	dropKeysCallback     DropKeysCallback
-	updateKeysCh         chan struct{} // Channel to signal when UpdateKeysDB is called
+	encrKeys                    map[KeyDataType]*EncrKeysInfo
+	refreshKeysCallback         RefreshKeysCallback
+	getInUseKeysCallback        GetInUseKeysCallback
+	dropKeysCallback            DropKeysCallback
+	synchronizeKeyFilesCallback SynchronizeKeyFilesCallback
+	updateKeysCh                chan struct{} // Channel to signal when UpdateKeysDB is called
 }
 
 type KeysCache struct {
@@ -730,7 +732,7 @@ func (s *Svc) UpdateDB(c *Cache, outparam *bool) error {
 	return nil
 }
 
-func RegisterEncryptionKeysCallbacks(s *Svc, refreshKeysCallback RefreshKeysCallback, getInUseKeysCallback GetInUseKeysCallback, dropKeysCallback DropKeysCallback) error {
+func RegisterEncryptionKeysCallbacks(s *Svc, refreshKeysCallback RefreshKeysCallback, getInUseKeysCallback GetInUseKeysCallback, dropKeysCallback DropKeysCallback, synchronizeKeyFilesCallback SynchronizeKeyFilesCallback) error {
 	s.l.Lock()
 	if s.keysDb.refreshKeysCallback != nil {
 		s.l.Unlock()
@@ -739,6 +741,7 @@ func RegisterEncryptionKeysCallbacks(s *Svc, refreshKeysCallback RefreshKeysCall
 	s.keysDb.refreshKeysCallback = refreshKeysCallback
 	s.keysDb.dropKeysCallback = dropKeysCallback
 	s.keysDb.getInUseKeysCallback = getInUseKeysCallback
+	s.keysDb.synchronizeKeyFilesCallback = synchronizeKeyFilesCallback
 
 	dataTypesToNotify := make([]KeyDataType, 0, len(s.keysDb.encrKeys))
 	if s.keysDb.encrKeys != nil {
@@ -811,6 +814,23 @@ func (s *Svc) GetInUseKeys(c *KeyDataType, outparam *[]string) error {
 		*outparam = res
 	}
 	return nil
+}
+
+func (s *Svc) SynchronizeKeyFiles(c *KeyDataType, outparam *Void) error {
+	if outparam != nil {
+		*outparam = nil
+	}
+	s.l.RLock()
+	callback := s.keysDb.synchronizeKeyFilesCallback
+	s.l.RUnlock()
+
+	if callback == nil {
+		// If no callback is registered, assume the service doesn't store
+		// data externally, so synchronization is not needed
+		return nil
+	}
+
+	return callback(*c)
 }
 
 func (s *Svc) DropKeys(c *DropKeysData, outparam *Void) error {

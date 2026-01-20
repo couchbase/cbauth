@@ -332,15 +332,16 @@ type EncrKeysInfo cbauthimpl.EncrKeysInfo
 type RefreshKeysCallback func(KeyDataType) error
 type GetInUseKeysCallback func(KeyDataType) ([]string, error)
 type DropKeysCallback func(KeyDataType, []string)
+type SynchronizeKeyFilesCallback func(KeyDataType) error
 
 type EncryptionKeys interface {
-	RegisterEncryptionKeysCallbacks(RefreshKeysCallback, GetInUseKeysCallback, DropKeysCallback) error
+	RegisterEncryptionKeysCallbacks(RefreshKeysCallback, GetInUseKeysCallback, DropKeysCallback, SynchronizeKeyFilesCallback) error
 	GetEncryptionKeys(KeyDataType) (*EncrKeysInfo, error)
 	GetEncryptionKeysBlocking(context.Context, KeyDataType) (*EncrKeysInfo, error)
 	KeysDropComplete(KeyDataType, error) error
 }
 
-func (a *authImpl) RegisterEncryptionKeysCallbacks(refreshKeysCallback RefreshKeysCallback, getInUseKeysCallback GetInUseKeysCallback, dropKeysCallback DropKeysCallback) error {
+func (a *authImpl) RegisterEncryptionKeysCallbacks(refreshKeysCallback RefreshKeysCallback, getInUseKeysCallback GetInUseKeysCallback, dropKeysCallback DropKeysCallback, synchronizeKeyFilesCallback SynchronizeKeyFilesCallback) error {
 	return cbauthimpl.RegisterEncryptionKeysCallbacks(a.svc,
 		func(keyType cbauthimpl.KeyDataType) error {
 			return refreshKeysCallback(KeyDataType(keyType))
@@ -350,6 +351,9 @@ func (a *authImpl) RegisterEncryptionKeysCallbacks(refreshKeysCallback RefreshKe
 		},
 		func(keyType cbauthimpl.KeyDataType, keys []string) {
 			dropKeysCallback(KeyDataType(keyType), keys)
+		},
+		func(keyType cbauthimpl.KeyDataType) error {
+			return synchronizeKeyFilesCallback(KeyDataType(keyType))
 		})
 }
 

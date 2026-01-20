@@ -375,11 +375,11 @@ func GetTLSConfig() (TLSConfig, error) {
 	return Default.GetTLSConfig()
 }
 
-func RegisterEncryptionKeysCallbacks(refreshKeysCallback RefreshKeysCallback, getInUseKeysCallback GetInUseKeysCallback, dropKeysCallback DropKeysCallback) error {
+func RegisterEncryptionKeysCallbacks(refreshKeysCallback RefreshKeysCallback, getInUseKeysCallback GetInUseKeysCallback, dropKeysCallback DropKeysCallback, synchronizeKeyFilesCallback SynchronizeKeyFilesCallback) error {
 	if Default == nil {
 		return ErrNotInitialized
 	}
-	Default.RegisterEncryptionKeysCallbacks(refreshKeysCallback, getInUseKeysCallback, dropKeysCallback)
+	Default.RegisterEncryptionKeysCallbacks(refreshKeysCallback, getInUseKeysCallback, dropKeysCallback, synchronizeKeyFilesCallback)
 	return nil
 }
 
