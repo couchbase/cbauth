@@ -952,13 +952,8 @@ func computeExpiryFromExtras(extras string) int64 {
 }
 
 // VerifyOnBehalf authenticates http request with on behalf header
-func VerifyOnBehalf(s *Svc, user, password, onBehalfUser,
+func VerifyOnBehalf(s *Svc, creds *CredsImpl, onBehalfUser,
 	onBehalfDomain string, onBehalfExtras string) (*CredsImpl, error) {
-
-	creds, err := VerifyPassword(s, user, password)
-	if err != nil {
-		return nil, err
-	}
 
 	allowed, err := creds.IsAllowed(
 		"cluster.admin.security.admin!impersonate")
