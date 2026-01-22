@@ -208,30 +208,38 @@ func (a *authImpl) AuthWebCredsCore(Hdr httpreq.HttpHeader,
 		return cbauthimpl.VerifyOnServer(a.svc, Hdr)
 	}
 
-	rv, err := cbauthimpl.MaybeGetCredsFromCert(a.svc, TLSState)
-	if err != nil {
-		return nil, err
-	} else if rv != nil {
-		return rv, nil
-	}
-
-	user, pwd, err := ExtractCredsGeneric(Hdr)
-	if err != nil {
-		return nil, err
-	}
-	if user == "" && pwd == "" {
-		return nil, fmt.Errorf("no web credentials found in request")
-	}
+	// Internal users with impersonate privileges may specify an on behalf
+	// of user and domain. Internal users may authenticate using client
+	// cert auth or basic auth.
 	onBehalfUser, onBehalfDomain, err := ExtractOnBehalfIdentityGeneric(Hdr)
 	if err != nil {
 		return nil, err
 	}
 
-	if onBehalfUser == "" && onBehalfDomain == "" {
-		return cbauthimpl.VerifyPassword(a.svc, user, pwd)
+	rv, err := cbauthimpl.MaybeGetCredsFromCert(a.svc, TLSState)
+	if err != nil {
+		return nil, err
 	}
 
-	return cbauthimpl.VerifyOnBehalf(a.svc, user, pwd,
+	if rv == nil {
+		user, pwd, err := ExtractCredsGeneric(Hdr)
+		if err != nil {
+			return nil, err
+		}
+		if user == "" && pwd == "" {
+			return nil, fmt.Errorf("no web credentials found in request")
+		}
+		rv, err = cbauthimpl.VerifyPassword(a.svc, user, pwd)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if onBehalfUser == "" && onBehalfDomain == "" {
+		return rv, nil
+	}
+
+	return cbauthimpl.VerifyOnBehalf(a.svc, rv,
 		onBehalfUser, onBehalfDomain, Hdr.Get("cb-on-behalf-extras"))
 }
 
