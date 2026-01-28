@@ -184,6 +184,9 @@ type HibernationManager interface {
 
 type BucketConfigParams struct {
 	Config string `json:"config"`
+	// Skip any heavy-weight validation - just parse the config and add the
+	// service's params.
+	JustReturnParams bool `json:"justReturnParams"`
 }
 
 type BucketConfigValidationSuccess struct {
