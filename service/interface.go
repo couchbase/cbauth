@@ -210,6 +210,13 @@ type BucketValidationResult struct {
 	Result map[string]any `json:"validationResult"`
 }
 
+// See BucketConfigParams for additional info.
+type ValidateBucketConfigParams struct {
+	// Parsed form of BucketConfigParams.Config
+	ParsedParams     map[string]string
+	JustReturnParams bool
+}
+
 type BucketConfigurationManager interface {
-	ValidateBucketConfig(params map[string]string) (*BucketValidationResult, error)
+	ValidateBucketConfig(ValidateBucketConfigParams) (*BucketValidationResult, error)
 }

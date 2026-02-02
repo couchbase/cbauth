@@ -319,7 +319,10 @@ func (s serviceAPI) ValidateBucketConfig(params BucketConfigParams, res *BucketV
 
 	cfg := parseConfig(params.Config)
 
-	result, err = s.bucketConfigManager.ValidateBucketConfig(cfg)
+	managerParams := ValidateBucketConfigParams{ParsedParams: cfg,
+		JustReturnParams: params.JustReturnParams}
+
+	result, err = s.bucketConfigManager.ValidateBucketConfig(managerParams)
 	if err == nil {
 		*res = *result
 	}
