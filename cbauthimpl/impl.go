@@ -204,6 +204,7 @@ type credsDB struct {
 	uuidCheckURL            string
 	userBucketsURL          string
 	keysDropCompleteURL     string
+	importEncryptionKeysURL string
 	specialUser             string
 	specialPasswords        []string
 	permissionsVersion      string
@@ -228,6 +229,7 @@ type Cache struct {
 	UuidCheckURL            string
 	UserBucketsURL          string
 	KeysDropCompleteURL     string   `json:"keysDropCompleteURL"`
+	ImportEncryptionKeysURL string   `json:"importEncryptionKeysURL"`
 	SpecialUser             string   `json:"specialUser"`
 	SpecialPasswords        []string `json:"specialPasswords"`
 	PermissionsVersion      string
@@ -611,6 +613,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		uuidCheckURL:            c.UuidCheckURL,
 		userBucketsURL:          c.UserBucketsURL,
 		keysDropCompleteURL:     c.KeysDropCompleteURL,
+		importEncryptionKeysURL: c.ImportEncryptionKeysURL,
 		specialUser:             c.SpecialUser,
 		specialPasswords:        c.SpecialPasswords,
 		permissionsVersion:      c.PermissionsVersion,
@@ -967,6 +970,58 @@ func KeysDropComplete(s *Svc, dataType KeyDataType, dropErr error) error {
 		return err
 	}
 
+	return nil
+}
+
+func ImportEncryptionKeys(s *Svc, dekPaths []string, dataType KeyDataType, timeout int) error {
+	db := fetchDB(s)
+	if db == nil {
+		return staleError(s)
+	}
+
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
+	body := struct {
+		Type       string   `json:"type"`
+		BucketUUID string   `json:"bucketUUID,omitempty"`
+		DekPaths   []string `json:"dekPaths"`
+		Timeout    int      `json:"timeout"`
+	}{
+		Type:       dataType.TypeName,
+		BucketUUID: dataType.BucketUUID,
+		DekPaths:   dekPaths,
+		Timeout:    timeout,
+	}
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		panic(err)
+	}
+
+	req, err := http.NewRequest("POST", db.importEncryptionKeysURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		panic(err)
+	}
+
+	if len(db.specialPasswords) > 0 {
+		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
+	}
+
+	req.Header.Set("User-Agent", userAgent)
+
+	hresp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer hresp.Body.Close()
+
+	if hresp.StatusCode != 200 {
+		bodyBytes, _ := io.ReadAll(hresp.Body)
+		return fmt.Errorf("POST %s returned %d. Expected 200. Body: %s", db.importEncryptionKeysURL, hresp.StatusCode, string(bodyBytes))
+	}
+
+	io.Copy(io.Discard, hresp.Body)
 	return nil
 }
 

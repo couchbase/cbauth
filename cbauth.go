@@ -339,6 +339,7 @@ type EncryptionKeys interface {
 	GetEncryptionKeys(KeyDataType) (*EncrKeysInfo, error)
 	GetEncryptionKeysBlocking(context.Context, KeyDataType) (*EncrKeysInfo, error)
 	KeysDropComplete(KeyDataType, error) error
+	ImportEncryptionKeys([]string, KeyDataType, int) error
 }
 
 func (a *authImpl) RegisterEncryptionKeysCallbacks(refreshKeysCallback RefreshKeysCallback, getInUseKeysCallback GetInUseKeysCallback, dropKeysCallback DropKeysCallback, synchronizeKeyFilesCallback SynchronizeKeyFilesCallback) error {
@@ -373,6 +374,10 @@ func (a *authImpl) GetEncryptionKeysBlocking(ctx context.Context, key KeyDataTyp
 // successful, dropErr must contains the error description.
 func (a *authImpl) KeysDropComplete(key KeyDataType, dropErr error) error {
 	return cbauthimpl.KeysDropComplete(a.svc, cbauthimpl.KeyDataType(key), dropErr)
+}
+
+func (a *authImpl) ImportEncryptionKeys(dekPaths []string, dataType KeyDataType, timeout int) error {
+	return cbauthimpl.ImportEncryptionKeys(a.svc, dekPaths, cbauthimpl.KeyDataType(dataType), timeout)
 }
 
 var _ EncryptionKeys = (*authImpl)(nil)

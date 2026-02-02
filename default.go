@@ -403,3 +403,10 @@ func GetEncryptionKeysBlocking(ctx context.Context, key KeyDataType) (*EncrKeysI
 	}
 	return Default.GetEncryptionKeysBlocking(ctx, key)
 }
+
+func ImportEncryptionKeys(dekPaths []string, dataType KeyDataType, timeout int) error {
+	if Default == nil {
+		return ErrNotInitialized
+	}
+	return Default.ImportEncryptionKeys(dekPaths, dataType, timeout)
+}
