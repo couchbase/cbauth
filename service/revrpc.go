@@ -330,8 +330,17 @@ func (s serviceAPI) ValidateBucketConfig(params BucketConfigParams, res *BucketV
 	return err
 }
 
+// Register the manager with ns_server. This blocks the current execution
+// context. See also RegisterManagerWithCompletionCallback.
 func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
+	return RegisterManagerWithCompletionCallback(mgr, errorPolicy, nil)
+}
 
+// See RegisterManager. Invokes the passed serviceSetupCallback function when
+// the ServiceAPI has been registered. This can be used by services to determine
+// when it is safe to continue bootstrapping if said bootstrapping requires use
+// of ns_server APIs that in turn require use of the ServiceAPI.
+func RegisterManagerWithCompletionCallback(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy, serviceSetupCallback func() error) error {
 	service, err := revrpc.GetDefaultServiceFromEnv("service_api")
 	if err != nil {
 		return err
@@ -344,9 +353,18 @@ func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 	bucketConfigManager, _ := mgr.(BucketConfigurationManager)
 
 	setup := func(rpc *rpc.Server) error {
-		return rpc.RegisterName("ServiceAPI",
+		err := rpc.RegisterName("ServiceAPI",
 			&serviceAPI{mgr, autofailoverManager, serverlessManager,
 				hibernationManager, infoManager, bucketConfigManager})
+		if err != nil {
+			return err
+		}
+
+		if serviceSetupCallback != nil {
+			return serviceSetupCallback()
+		}
+
+		return nil
 	}
 
 	return revrpc.BabysitService(setup, service, errorPolicy)
