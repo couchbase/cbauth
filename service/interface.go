@@ -217,6 +217,15 @@ type ValidateBucketConfigParams struct {
 	JustReturnParams bool
 }
 
+// If registering a BucketConfigurationManager, note that ValidateBucketConfig
+// will be called in various ns_server REST APIs. As such, care should be
+// taken to:
+//
+// 1) Not require any API calling this (`/pools/default/buckets` etc) to
+//    bootstrap before registering the ServiceAPI
+// 2) Reduce the time spent taken in this call - a parameter `JustReturnParams`
+//    is set on the read/GET path such that heavy validation actions can be
+//    skipped when not necessary.
 type BucketConfigurationManager interface {
 	ValidateBucketConfig(ValidateBucketConfigParams) (*BucketValidationResult, error)
 }
