@@ -875,13 +875,17 @@ func GetEncryptionKeys(s *Svc, t KeyDataType) (*EncrKeysInfo, error) {
 
 func normalizedKeyDataType(key KeyDataType) (KeyDataType, error) {
 	bucketUUID := key.BucketUUID
-	if key.TypeName != "bucket" {
+	if key.TypeName != "bucket" && key.TypeName != "service_bucket" {
 		bucketUUID = ""
 	}
 	switch key.TypeName {
 	case "bucket":
 		if bucketUUID == "" {
 			return KeyDataType{}, fmt.Errorf("bucket uuid is required for bucket key type")
+		}
+        case "service_bucket":
+		if bucketUUID == "" {
+			return KeyDataType{}, fmt.Errorf("bucket uuid is required for service_bucket key type")
 		}
 	case "config":
 	case "log":
