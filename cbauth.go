@@ -181,6 +181,9 @@ var ErrNoUuid = cbauthimpl.ErrNoUuid
 // ErrCredentialsExpired is returned when credentials have expired
 var ErrCredentialsExpired = cbauthimpl.ErrCredentialsExpired
 
+// ErrKeysNotAvailable is returned if ns_server hasn't provided the encryption keys yet
+var ErrKeysNotAvailable = cbauthimpl.ErrKeysNotAvailable
+
 // UnknownHostPortError is returned from GetMemcachedServiceAuth and
 // GetHTTPServiceAuth calls for unknown host:port arguments.
 type UnknownHostPortError string

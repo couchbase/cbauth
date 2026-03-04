@@ -134,6 +134,9 @@ var ErrUserNotFound = errors.New("Username not found")
 // ErrCredentialsExpired is returned when credentials have expired
 var ErrCredentialsExpired = errors.New("Credentials have expired")
 
+// ErrKeysNotAvailable is returned if ns_server hasn't provided the encryption keys yet
+var ErrKeysNotAvailable = errors.New("Keys are not available yet")
+
 const (
 	uaCbauthSuffix  = "cbauth"
 	uaCbauthVersion = ""
@@ -868,7 +871,7 @@ func GetEncryptionKeys(s *Svc, t KeyDataType) (*EncrKeysInfo, error) {
 		return nil, err
 	}
 	if res == nil {
-		return nil, fmt.Errorf("no keys found for key type: %v", t)
+		return nil, ErrKeysNotAvailable
 	}
 	return res, nil
 }
