@@ -25,12 +25,13 @@ import (
 )
 
 type serviceAPI struct {
-	mgr                 Manager
-	autofailoverManager AutofailoverManager
-	serverlessManager   ServerlessManager
-	hibernationManager  HibernationManager
-	infoManager         InfoManager
-	bucketConfigManager BucketConfigurationManager
+	mgr                       Manager
+	autofailoverManager       AutofailoverManager
+	serverlessManager         ServerlessManager
+	hibernationManager        HibernationManager
+	infoManager               InfoManager
+	bucketConfigManager       BucketConfigurationManager
+	externalCollectionManager ExternalCollectionsManager
 }
 
 type Void *struct{}
@@ -330,6 +331,22 @@ func (s serviceAPI) ValidateBucketConfig(params BucketConfigParams, res *BucketV
 	return err
 }
 
+func (s serviceAPI) ValidateExternalCatalog(params ExternalCatalogValidationParams, res *ExternalCatalogValidationResult) error {
+    var result *ExternalCatalogValidationResult
+    var err error
+
+    if s.externalCollectionManager == nil {
+        return errors.New("ExternalCollectionsManager is not implemented")
+    }
+
+    result, err = s.externalCollectionManager.ValidateExternalCatalog(params)
+    if err == nil {
+        *res = *result
+    }
+
+    return err
+}
+
 // Register the manager with ns_server. This blocks the current execution
 // context. See also RegisterManagerWithCompletionCallback.
 func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
@@ -351,11 +368,13 @@ func RegisterManagerWithCompletionCallback(mgr Manager, errorPolicy revrpc.Babys
 	hibernationManager, _ := mgr.(HibernationManager)
 	infoManager, _ := mgr.(InfoManager)
 	bucketConfigManager, _ := mgr.(BucketConfigurationManager)
+	externalCollectionManager, _ := mgr.(ExternalCollectionsManager)
 
 	setup := func(rpc *rpc.Server) error {
 		err := rpc.RegisterName("ServiceAPI",
 			&serviceAPI{mgr, autofailoverManager, serverlessManager,
-				hibernationManager, infoManager, bucketConfigManager})
+				hibernationManager, infoManager, bucketConfigManager,
+				externalCollectionManager})
 		if err != nil {
 			return err
 		}

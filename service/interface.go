@@ -229,3 +229,26 @@ type ValidateBucketConfigParams struct {
 type BucketConfigurationManager interface {
 	ValidateBucketConfig(ValidateBucketConfigParams) (*BucketValidationResult, error)
 }
+
+type ExternalCatalogValidationSuccess struct {
+	Value           any    `json:"value"`
+	Visibility      string `json:"visibility"`
+}
+
+type ExternalCatalogValidationError = BucketConfigValidationError
+
+type ExternalCatalogValidationResult = BucketValidationResult
+
+type ExternalCatalogValidationParams struct {
+	Data map[string]any `json:"config"`
+}
+
+// If registering an ExternalCollectionsManager, note that ValidateExternalCatalog
+// will be called by ns_server to validate external catalog configurations.
+//
+// Similarly to the BucketConfigurationManager, any service registering the
+// manager needs to take care when bootstrapping to make this API available as
+// soon as possible.
+type ExternalCollectionsManager interface {
+	ValidateExternalCatalog(ExternalCatalogValidationParams) (*ExternalCatalogValidationResult, error)
+}
