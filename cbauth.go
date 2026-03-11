@@ -149,9 +149,30 @@ type Creds interface {
 	Expiry() int64
 	// Extras returns the raw extras string (for JWT)
 	Extras() string
+	// GetCredential retrieves the decrypted, ready-to-use credential by id
+	// on behalf of the authenticated user represented by these Creds.
+	// The RBAC consume permission is checked against this user's identity.
+	// The caller is responsible for clearing sensitive fields after use.
+	GetCredential(id string) (*Credential, error)
 }
 
 var _ Creds = (*cbauthimpl.CredsImpl)(nil)
+
+// Credential types re-exported from cbauthimpl for use by cbauth consumers.
+type CredentialType = cbauthimpl.CredentialType
+type CredentialMeta = cbauthimpl.CredentialMeta
+type Credential = cbauthimpl.Credential
+
+const (
+	CredentialTypeAWS          = cbauthimpl.CredentialTypeAWS
+	CredentialTypeAzureShared  = cbauthimpl.CredentialTypeAzureShared
+	CredentialTypeAzureAD      = cbauthimpl.CredentialTypeAzureAD
+	CredentialTypeAzureSAS     = cbauthimpl.CredentialTypeAzureSAS
+	CredentialTypeAzureManaged = cbauthimpl.CredentialTypeAzureManaged
+	CredentialTypeGCP          = cbauthimpl.CredentialTypeGCP
+	CredentialTypeHTTP         = cbauthimpl.CredentialTypeHTTP
+	CredentialTypeCouchbase    = cbauthimpl.CredentialTypeCouchbase
+)
 
 type authImpl struct {
 	svc *cbauthimpl.Svc
@@ -183,6 +204,26 @@ var ErrCredentialsExpired = cbauthimpl.ErrCredentialsExpired
 
 // ErrKeysNotAvailable is returned if ns_server hasn't provided the encryption keys yet
 var ErrKeysNotAvailable = cbauthimpl.ErrKeysNotAvailable
+
+// ErrCredentialNotFound is returned by GetCredential when the requested
+// credential id does not exist.
+var ErrCredentialNotFound = cbauthimpl.ErrCredentialNotFound
+
+// ErrInsufficientPermissions is returned when the user lacks RBAC permission
+// to perform the requested operation (e.g., consume permission for credentials).
+var ErrInsufficientPermissions = cbauthimpl.ErrInsufficientPermissions
+
+// ErrServiceGuardrailBlocked is returned when the calling service is not
+// listed in the credential's allowedServices guardrail.
+var ErrServiceGuardrailBlocked = cbauthimpl.ErrServiceGuardrailBlocked
+
+// ErrStoredCredentialExpired is returned when a stored credential's TTL
+// (expiresAt) has passed.
+var ErrStoredCredentialExpired = cbauthimpl.ErrStoredCredentialExpired
+
+// ErrSchemaVersionUnsupported is returned when a credential uses a schema
+// version that this version of cbauth does not support.
+var ErrSchemaVersionUnsupported = cbauthimpl.ErrSchemaVersionUnsupported
 
 // UnknownHostPortError is returned from GetMemcachedServiceAuth and
 // GetHTTPServiceAuth calls for unknown host:port arguments.

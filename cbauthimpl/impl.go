@@ -137,6 +137,26 @@ var ErrCredentialsExpired = errors.New("Credentials have expired")
 // ErrKeysNotAvailable is returned if ns_server hasn't provided the encryption keys yet
 var ErrKeysNotAvailable = errors.New("Keys are not available yet")
 
+// ErrCredentialNotFound is returned by GetCredential when the requested
+// credential id does not exist (ns_server returned HTTP 404).
+var ErrCredentialNotFound = errors.New("credential not found")
+
+// ErrInsufficientPermissions is returned when the user lacks RBAC permission
+// to perform the requested operation (e.g., consume permission for credentials).
+var ErrInsufficientPermissions = errors.New("insufficient permissions")
+
+// ErrServiceGuardrailBlocked is returned when the calling service is not
+// listed in the credential's allowedServices guardrail.
+var ErrServiceGuardrailBlocked = errors.New("service not allowed by guardrail")
+
+// ErrStoredCredentialExpired is returned when a stored credential's TTL
+// (expiresAt) has passed.
+var ErrStoredCredentialExpired = errors.New("stored credential has expired")
+
+// ErrSchemaVersionUnsupported is returned when a credential uses a schema
+// version that this version of cbauth does not support.
+var ErrSchemaVersionUnsupported = errors.New("unsupported credential schema version")
+
 const (
 	uaCbauthSuffix  = "cbauth"
 	uaCbauthVersion = ""
@@ -208,6 +228,7 @@ type credsDB struct {
 	userBucketsURL          string
 	keysDropCompleteURL     string
 	importEncryptionKeysURL string
+	getCredentialBaseURL    string
 	specialUser             string
 	specialPasswords        []string
 	permissionsVersion      string
@@ -233,6 +254,7 @@ type Cache struct {
 	UserBucketsURL          string
 	KeysDropCompleteURL     string   `json:"keysDropCompleteURL"`
 	ImportEncryptionKeysURL string   `json:"importEncryptionKeysURL"`
+	GetCredentialBaseURL    string   `json:"getCredentialBaseURL"`
 	SpecialUser             string   `json:"specialUser"`
 	SpecialPasswords        []string `json:"specialPasswords"`
 	PermissionsVersion      string
@@ -392,6 +414,16 @@ func (c *CredsImpl) Expiry() int64 {
 // Extras returns the raw extras string (additional authentication context)
 func (c *CredsImpl) Extras() string {
 	return c.extras
+}
+
+// GetCredential retrieves the decrypted credential on behalf of the
+// authenticated user represented by these Creds.  The RBAC consume
+// permission check on ns_server is performed against this user's identity.
+func (c *CredsImpl) GetCredential(id string) (*Credential, error) {
+	if err := c.checkExpiry(); err != nil {
+		return nil, err
+	}
+	return GetCredential(c.s, id, c.name, c.domain, c.extras)
 }
 
 func verifySpecialCreds(db *credsDB, user, password string) bool {
@@ -618,6 +650,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		userBucketsURL:          c.UserBucketsURL,
 		keysDropCompleteURL:     c.KeysDropCompleteURL,
 		importEncryptionKeysURL: c.ImportEncryptionKeysURL,
+		getCredentialBaseURL:    c.GetCredentialBaseURL,
 		specialUser:             c.SpecialUser,
 		specialPasswords:        c.SpecialPasswords,
 		permissionsVersion:      c.PermissionsVersion,
@@ -1741,6 +1774,339 @@ func checkPermission(s *Svc, user, domain, extras, permission string, audit bool
 	}
 
 	return allowed, err
+}
+
+// Author identifies who created or last updated a credential.
+type Author struct {
+	User   string `json:"user"`
+	Domain string `json:"domain"`
+}
+
+// URLWhitelist contains URL-level access restrictions inside a
+// credential's guardrails.  Services must enforce these at runtime;
+// ns_server does not.
+type URLWhitelist struct {
+	AllAccess      bool     `json:"allAccess,omitempty"`
+	AllowedURLs    []string `json:"allowedUrls,omitempty"`
+	DisallowedURLs []string `json:"disallowedUrls,omitempty"`
+}
+
+// CredentialGuardrails contains optional usage restrictions that services
+// must enforce at runtime. ns_server enforces only AllowedServices;
+// all other guardrails are the service's responsibility.
+type CredentialGuardrails struct {
+	AllowedServices   []string      `json:"allowedServices,omitempty"`
+	URLWhitelist      *URLWhitelist `json:"urlWhitelist,omitempty"`
+	AllowedResources  []string      `json:"allowedResources,omitempty"`
+	AllowedOperations []string      `json:"allowedOperations,omitempty"`
+}
+
+// CredentialMeta holds the metadata returned for a credential.
+// All timestamp fields are milliseconds since the Unix epoch.
+type CredentialMeta struct {
+	Description    string               `json:"description,omitempty"`
+	Guardrails     CredentialGuardrails `json:"guardrails,omitempty"`
+	CreatedAt      int64                `json:"createdAt"`
+	CreatedBy      Author               `json:"createdBy"`
+	UpdatedAt      int64                `json:"updatedAt,omitempty"`
+	UpdatedBy      *Author              `json:"updatedBy,omitempty"`
+	ExpiresAt      int64                `json:"expiresAt,omitempty"`
+	PayloadVersion string               `json:"payloadVersion,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// Credential payload types – one per credential type in cb_credential_types.
+// Field names and JSON tags match the camelCase wire format produced by
+// cb_credential_types:export_fields/2.
+// ---------------------------------------------------------------------------
+
+// CredentialType represents the type of a stored credential.
+type CredentialType string
+
+const (
+	CredentialTypeAWS          CredentialType = "aws"
+	CredentialTypeAzureShared  CredentialType = "azureShared"
+	CredentialTypeAzureAD      CredentialType = "azureAd"
+	CredentialTypeAzureSAS     CredentialType = "azureSas"
+	CredentialTypeAzureManaged CredentialType = "azureManaged"
+	CredentialTypeGCP          CredentialType = "gcp"
+	CredentialTypeHTTP         CredentialType = "http"
+	CredentialTypeCouchbase    CredentialType = "couchbase"
+)
+
+// AWSPayload holds AWS S3 / S3-compatible credential fields.
+type AWSPayload struct {
+	AccessKeyID     string `json:"accessKeyId"`
+	SecretAccessKey string `json:"secretAccessKey"`
+	Region          string `json:"region"`
+	Endpoint        string `json:"endpoint,omitempty"`
+	SessionToken    string `json:"sessionToken,omitempty"`
+}
+
+// AzureSharedPayload holds Azure Shared Key credential fields.
+type AzureSharedPayload struct {
+	AccountName string `json:"accountName"`
+	AccountKey  string `json:"accountKey"`
+	Endpoint    string `json:"endpoint,omitempty"`
+}
+
+// AzureADPayload holds Azure Active Directory credential fields.
+// Exactly one of ClientSecret or Certificate is populated.
+type AzureADPayload struct {
+	ClientID     string `json:"clientId"`
+	TenantID     string `json:"tenantId"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	ClientSecret string `json:"clientSecret,omitempty"`
+	Certificate  string `json:"certificate,omitempty"`
+	CertPassword string `json:"certPassword,omitempty"`
+}
+
+// AzureSASPayload holds Azure Shared Access Signature credential fields.
+type AzureSASPayload struct {
+	AccountName           string `json:"accountName"`
+	SharedAccessSignature string `json:"sharedAccessSignature"`
+	Endpoint              string `json:"endpoint,omitempty"`
+}
+
+// AzureManagedPayload holds Azure Managed Identity credential fields.
+type AzureManagedPayload struct {
+	ManagedIdentityID string `json:"managedIdentityId,omitempty"`
+	Endpoint          string `json:"endpoint,omitempty"`
+}
+
+// GCPPayload holds GCP credential fields for the consolidated "gcp" type.
+// Exactly one authentication mode is populated per credential:
+//   - Service-account mode: JSONCredentials is set (and optionally Region / Endpoint).
+//   - HMAC mode: AccessKeyID + SecretAccessKey are set (and optionally Region / Endpoint).
+type GCPPayload struct {
+	// Service-account mode fields
+	JSONCredentials string `json:"jsonCredentials,omitempty"`
+
+	// HMAC mode fields
+	AccessKeyID     string `json:"accessKeyId,omitempty"`
+	SecretAccessKey string `json:"secretAccessKey,omitempty"`
+
+	// Shared fields
+	Region   string `json:"region,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+}
+
+// HTTPPayload holds generic HTTP credential fields.
+type HTTPPayload struct {
+	AuthScheme      string `json:"authScheme"` // "basic", "bearer", "mtls"
+	Username        string `json:"username,omitempty"`
+	Password        string `json:"password,omitempty"`
+	HeaderName      string `json:"headerName,omitempty"`
+	Token           string `json:"token,omitempty"`
+	Certificate     string `json:"certificate,omitempty"`
+	PrivateKey      string `json:"privateKey,omitempty"`
+	Passphrase      string `json:"passphrase,omitempty"`
+	RootCertificate string `json:"rootCertificate,omitempty"`
+	SkipVerify      bool   `json:"skipVerify,omitempty"`
+}
+
+// CouchbasePayload holds Couchbase remote-cluster credential fields.
+type CouchbasePayload struct {
+	EncryptionType  string `json:"encryptionType"` // "none", "half", "full"
+	Username        string `json:"username,omitempty"`
+	Password        string `json:"password,omitempty"`
+	Certificate     string `json:"certificate,omitempty"`
+	PrivateKey      string `json:"privateKey,omitempty"`
+	Passphrase      string `json:"passphrase,omitempty"`
+	RootCertificate string `json:"rootCertificate,omitempty"`
+}
+
+// Credential is the full, decrypted credential returned by GetCredential.
+// Exactly one of the type-specific payload fields will be non-nil,
+// corresponding to the Type.
+type Credential struct {
+	ID            string         `json:"id"`
+	Type          CredentialType `json:"type"`
+	SchemaVersion int            `json:"schemaVersion"`
+	Meta          CredentialMeta `json:"meta"`
+
+	AWS          *AWSPayload          `json:"aws,omitempty"`
+	AzureShared  *AzureSharedPayload  `json:"azureShared,omitempty"`
+	AzureAD      *AzureADPayload      `json:"azureAd,omitempty"`
+	AzureSAS     *AzureSASPayload     `json:"azureSas,omitempty"`
+	AzureManaged *AzureManagedPayload `json:"azureManaged,omitempty"`
+	GCP          *GCPPayload          `json:"gcp,omitempty"`
+	HTTP         *HTTPPayload         `json:"http,omitempty"`
+	Couchbase    *CouchbasePayload    `json:"couchbase,omitempty"`
+}
+
+// unmarshalCredentialFields decodes JSON-encoded fields into the appropriate
+// typed payload struct for the given credential type.  Returns an error only
+// if the JSON is malformed for the target struct.
+func unmarshalCredentialFields(credType CredentialType, fieldsJSON []byte, cred *Credential) error {
+	switch credType {
+	case CredentialTypeAWS:
+		cred.AWS = &AWSPayload{}
+		return json.Unmarshal(fieldsJSON, cred.AWS)
+	case CredentialTypeAzureShared:
+		cred.AzureShared = &AzureSharedPayload{}
+		return json.Unmarshal(fieldsJSON, cred.AzureShared)
+	case CredentialTypeAzureAD:
+		cred.AzureAD = &AzureADPayload{}
+		return json.Unmarshal(fieldsJSON, cred.AzureAD)
+	case CredentialTypeAzureSAS:
+		cred.AzureSAS = &AzureSASPayload{}
+		return json.Unmarshal(fieldsJSON, cred.AzureSAS)
+	case CredentialTypeAzureManaged:
+		cred.AzureManaged = &AzureManagedPayload{}
+		return json.Unmarshal(fieldsJSON, cred.AzureManaged)
+	case CredentialTypeGCP:
+		cred.GCP = &GCPPayload{}
+		return json.Unmarshal(fieldsJSON, cred.GCP)
+	case CredentialTypeHTTP:
+		cred.HTTP = &HTTPPayload{}
+		return json.Unmarshal(fieldsJSON, cred.HTTP)
+	case CredentialTypeCouchbase:
+		cred.Couchbase = &CouchbasePayload{}
+		return json.Unmarshal(fieldsJSON, cred.Couchbase)
+	default:
+		// Unknown type – leave all payload fields nil.  The caller still
+		// has ID, Type, SchemaVersion and Meta available.
+		return nil
+	}
+}
+
+// processResponseCredential parses a GET /_cbauth/getCredential/<id> response.
+// The wire format uses a generic "fields" key; this function promotes the
+// fields into the strongly-typed payload field that matches the credential
+// type (Option B interface).
+func processResponseCredential(resp *http.Response) (interface{}, error) {
+	if resp.StatusCode == 404 {
+		return nil, ErrCredentialNotFound
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("getCredential: read body: %v", err)
+	}
+
+	// Handle error responses (non-200 status codes)
+	if resp.StatusCode != 200 {
+		var errResp struct {
+			Error struct {
+				Code   string `json:"code"`
+				Reason string `json:"reason"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(body, &errResp) == nil && errResp.Error.Code != "" {
+			switch errResp.Error.Code {
+			case "INSUFFICIENT_PERMISSIONS":
+				return nil, ErrInsufficientPermissions
+			case "SERVICE_GUARDRAIL_BLOCKED":
+				return nil, ErrServiceGuardrailBlocked
+			case "CREDENTIAL_EXPIRED":
+				return nil, ErrStoredCredentialExpired
+			case "UNSUPPORTED_SCHEMA_VERSION":
+				return nil, ErrSchemaVersionUnsupported
+			}
+		}
+		return nil, fmt.Errorf("unexpected status from getCredential: %s",
+			resp.Status)
+	}
+
+	// First pass: decode everything except the type-specific fields.
+	var raw struct {
+		ID            string                 `json:"id"`
+		Type          CredentialType         `json:"type"`
+		SchemaVersion int                    `json:"schemaVersion"`
+		Meta          CredentialMeta         `json:"meta"`
+		Fields        map[string]interface{} `json:"fields"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("getCredential: unmarshal: %v", err)
+	}
+
+	cred := &Credential{
+		ID:            raw.ID,
+		Type:          raw.Type,
+		SchemaVersion: raw.SchemaVersion,
+		Meta:          raw.Meta,
+	}
+
+	// Second pass: re-marshal the generic fields map and decode it into
+	// the concrete payload struct determined by the credential type.
+	if raw.Fields != nil {
+		fieldsJSON, err := json.Marshal(raw.Fields)
+		if err != nil {
+			return nil, fmt.Errorf("getCredential: re-marshal fields: %v", err)
+		}
+		if err := unmarshalCredentialFields(raw.Type, fieldsJSON, cred); err != nil {
+			return nil, fmt.Errorf("getCredential: unmarshal %s fields: %v",
+				raw.Type, err)
+		}
+	}
+
+	return cred, nil
+}
+
+// GetCredential retrieves the decrypted, ready-to-use credential with the
+// given id from ns_server via the /_cbauth/getCredential/<id> endpoint.
+// The user/domain/extras identify the end-user on whose behalf the credential
+// is being consumed; ns_server checks the consume RBAC permission against
+// this identity (the same on-behalf-of pattern used by checkPermission,
+// getUserBuckets, etc.).
+// The returned Credential contains plaintext sensitive values; callers are
+// responsible for wiping sensitive material after use.
+func GetCredential(s *Svc, id, user, domain, extras string) (*Credential, error) {
+	db := fetchDB(s)
+	if db == nil {
+		return nil, staleError(s)
+	}
+
+	if db.getCredentialBaseURL == "" {
+		return nil, fmt.Errorf("getCredential: endpoint not available " +
+			"(ns_server may be an older version)")
+	}
+
+	// Build the URL: <base>/<url-path-escaped id>
+	// The id may contain '/' characters (e.g. "backup/aws/prod"), so we
+	// escape each segment individually.
+	segments := strings.Split(id, "/")
+	escaped := make([]string, len(segments))
+	for i, seg := range segments {
+		escaped[i] = url.PathEscape(seg)
+	}
+	credURL := db.getCredentialBaseURL + "/" + strings.Join(escaped, "/")
+
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
+	req, err := http.NewRequest("GET", credURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	if len(db.specialPasswords) > 0 {
+		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
+	}
+
+	v := url.Values{}
+	v.Set("user", user)
+	v.Set("domain", domain)
+	if extras != "" {
+		encoded := base64.StdEncoding.EncodeToString([]byte(extras))
+		v.Set("extras", encoded)
+	}
+	maybeSetClusterUUID(s, &v)
+	req.URL.RawQuery = v.Encode()
+
+	hresp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer hresp.Body.Close()
+	defer io.Copy(ioutil.Discard, hresp.Body)
+
+	val, err := processResponseCredential(hresp)
+	if err != nil {
+		return nil, err
+	}
+	return val.(*Credential), nil
 }
 
 type userPassword struct {
