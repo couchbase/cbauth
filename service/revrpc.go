@@ -347,6 +347,22 @@ func (s serviceAPI) ValidateExternalCatalog(params ExternalCatalogValidationPara
     return err
 }
 
+func (s serviceAPI) ValidateExternalCollection(params ExternalCollectionValidationParams, res *ExternalCollectionValidationResult) error {
+    var result *ExternalCollectionValidationResult
+    var err error
+
+    if s.externalCollectionManager == nil {
+        return errors.New("ExternalCollectionsManager is not implemented")
+    }
+
+    result, err = s.externalCollectionManager.ValidateExternalCollection(params)
+    if err == nil {
+        *res = *result
+    }
+
+    return err
+}
+
 // Register the manager with ns_server. This blocks the current execution
 // context. See also RegisterManagerWithCompletionCallback.
 func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {

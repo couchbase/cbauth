@@ -243,6 +243,12 @@ type ExternalCatalogValidationParams struct {
 	Data map[string]any `json:"config"`
 }
 
+type ExternalCollectionValidationError = BucketConfigValidationError
+type ExternalCollectionValidationSuccess = BucketConfigValidationSuccess
+
+type ExternalCollectionValidationResult = ExternalCatalogValidationResult
+type ExternalCollectionValidationParams = ExternalCatalogValidationParams
+
 // If registering an ExternalCollectionsManager, note that ValidateExternalCatalog
 // will be called by ns_server to validate external catalog configurations.
 //
@@ -251,4 +257,5 @@ type ExternalCatalogValidationParams struct {
 // soon as possible.
 type ExternalCollectionsManager interface {
 	ValidateExternalCatalog(ExternalCatalogValidationParams) (*ExternalCatalogValidationResult, error)
+	ValidateExternalCollection(ExternalCollectionValidationParams) (*ExternalCollectionValidationResult, error)
 }
