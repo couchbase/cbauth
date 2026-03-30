@@ -886,13 +886,14 @@ func normalizedKeyDataType(key KeyDataType) (KeyDataType, error) {
 		if bucketUUID == "" {
 			return KeyDataType{}, fmt.Errorf("bucket uuid is required for bucket key type")
 		}
-        case "service_bucket":
+	case "service_bucket":
 		if bucketUUID == "" {
 			return KeyDataType{}, fmt.Errorf("bucket uuid is required for service_bucket key type")
 		}
 	case "config":
 	case "log":
 	case "audit":
+	case "other":
 	default:
 		return KeyDataType{}, fmt.Errorf("invalid key type: %s", key.TypeName)
 	}
