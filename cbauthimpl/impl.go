@@ -292,6 +292,7 @@ type keysDB struct {
 	dropKeysCallback            DropKeysCallback
 	synchronizeKeyFilesCallback SynchronizeKeyFilesCallback
 	updateKeysCh                chan struct{} // Channel to signal when UpdateKeysDB is called
+	registerKeysCh              chan struct{} // Channel to signal when RegisterEncryptionKeysCallbacks is called
 }
 
 type KeysCache struct {
@@ -751,30 +752,11 @@ func RegisterEncryptionKeysCallbacks(s *Svc, refreshKeysCallback RefreshKeysCall
 	s.keysDb.getInUseKeysCallback = getInUseKeysCallback
 	s.keysDb.synchronizeKeyFilesCallback = synchronizeKeyFilesCallback
 
-	dataTypesToNotify := make([]KeyDataType, 0, len(s.keysDb.encrKeys))
-	if s.keysDb.encrKeys != nil {
-		for k := range s.keysDb.encrKeys {
-			dataTypesToNotify = append(dataTypesToNotify, k)
-		}
+	if s.keysDb.registerKeysCh != nil {
+		close(s.keysDb.registerKeysCh)
+		s.keysDb.registerKeysCh = nil
 	}
 	s.l.Unlock()
-
-	if len(dataTypesToNotify) > 0 {
-		go func() {
-			for _, dataType := range dataTypesToNotify {
-				// Ignoring the return value in this case.
-				// Ns_server theats missing callback as error when handling
-				// key updates. For this reason, it will have to retry the
-				// update anyway and the return value will not be ignored
-				// that time.
-				// Note that strictly speaking, we don't have to call
-				// the callback here (for the same reason - ns_server will retry
-				// the update anyway), but that can slow down the service
-				// as it can wait for the callback to be called.
-				refreshKeysCallback(dataType)
-			}
-		}()
-	}
 	return nil
 }
 
@@ -786,11 +768,15 @@ func (s *Svc) UpdateKeysDB(c *KeysCache, outparam *Void) error {
 	if err != nil {
 		return err
 	}
+	if err := waitCallbacksRegistered(s); err != nil {
+		return err
+	}
 	s.l.Lock()
 	if s.keysDb.encrKeys == nil {
 		s.keysDb.encrKeys = make(map[KeyDataType]*EncrKeysInfo)
 	}
 	updateKeysDBLocked(s.keysDb.encrKeys, key, c)
+	// callback can't be null because waitCallbacksRegistered is called above
 	callback := s.keysDb.refreshKeysCallback
 	if s.keysDb.updateKeysCh != nil {
 		// Signal all waiting GetEncryptionKeysBlocking calls
@@ -799,22 +785,19 @@ func (s *Svc) UpdateKeysDB(c *KeysCache, outparam *Void) error {
 	}
 	s.l.Unlock()
 
-	if callback == nil {
-		return errors.New("no callback registered")
-	}
-
 	return callback(key)
 }
 
 func (s *Svc) GetInUseKeys(c *KeyDataType, outparam *[]string) error {
 	if outparam != nil {
+		if err := waitCallbacksRegistered(s); err != nil {
+			return err
+		}
 		s.l.RLock()
+		// callback can't be null because waitCallbacksRegistered is called above
 		callback := s.keysDb.getInUseKeysCallback
 		s.l.RUnlock()
 
-		if callback == nil {
-			return errors.New("no callback registered")
-		}
 		res, err := callback(*c)
 		if err != nil {
 			return err
@@ -827,6 +810,9 @@ func (s *Svc) GetInUseKeys(c *KeyDataType, outparam *[]string) error {
 func (s *Svc) SynchronizeKeyFiles(c *KeyDataType, outparam *Void) error {
 	if outparam != nil {
 		*outparam = nil
+	}
+	if err := waitCallbacksRegistered(s); err != nil {
+		return err
 	}
 	s.l.RLock()
 	callback := s.keysDb.synchronizeKeyFilesCallback
@@ -845,12 +831,13 @@ func (s *Svc) DropKeys(c *DropKeysData, outparam *Void) error {
 	if outparam != nil {
 		*outparam = nil
 	}
+	if err := waitCallbacksRegistered(s); err != nil {
+		return err
+	}
 	s.l.RLock()
+	// callback can't be null because waitCallbacksRegistered is called above
 	callback := s.keysDb.dropKeysCallback
 	s.l.RUnlock()
-	if callback == nil {
-		return errors.New("no callback registered")
-	}
 	callback(c.DataType, c.Keys)
 	return nil
 }
@@ -863,6 +850,36 @@ func updateKeysDBLocked(encrKeys map[KeyDataType]*EncrKeysInfo, key KeyDataType,
 		Path:              c.Path,
 	}
 	encrKeys[key] = new
+}
+
+func waitCallbacksRegistered(s *Svc) error {
+	// In most cases the callback is already registered so no need in RW lock
+	s.l.RLock()
+	if s.keysDb.refreshKeysCallback != nil {
+		s.l.RUnlock()
+		return nil
+	}
+	s.l.RUnlock()
+
+	// Rare case: callback is not registered yet, so we should wait
+	s.l.Lock()
+	if s.keysDb.refreshKeysCallback != nil {
+		s.l.Unlock()
+		return nil
+	}
+
+	if s.keysDb.registerKeysCh == nil {
+		s.keysDb.registerKeysCh = make(chan struct{})
+	}
+	ch := s.keysDb.registerKeysCh
+	s.l.Unlock()
+
+	select {
+	case <-ch:
+		return nil
+	case <-time.After(5 * time.Second):
+		return errors.New("no callback registered")
+	}
 }
 
 func GetEncryptionKeys(s *Svc, t KeyDataType) (*EncrKeysInfo, error) {
