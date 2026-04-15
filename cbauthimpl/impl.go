@@ -796,8 +796,11 @@ func (s *Svc) GetInUseKeys(c *KeyDataType, outparam *[]string) error {
 		s.l.RLock()
 		// callback can't be null because waitCallbacksRegistered is called above
 		callback := s.keysDb.getInUseKeysCallback
+		keysInitialized := (s.keysDb.encrKeys != nil)
 		s.l.RUnlock()
-
+		if !keysInitialized {
+			return errors.New("keys-not-set")
+		}
 		res, err := callback(*c)
 		if err != nil {
 			return err
