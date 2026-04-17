@@ -17,6 +17,7 @@ package cbauth
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 )
@@ -42,6 +43,24 @@ func SetRequestAuthVia(req *http.Request, a Authenticator) error {
 // with nil authenticator.
 func SetRequestAuth(req *http.Request) error {
 	return SetRequestAuthVia(req, nil)
+}
+
+// SetOnBehalfOfHeaders populates cb-on-behalf-of and, when the Creds
+// carry a non-empty Extras() string, cb-on-behalf-extras on req. Callers
+// should still set their own transport credentials on req separately
+// (e.g. via SetRequestAuth); OBO headers layer on top of that auth.
+func SetOnBehalfOfHeaders(req *http.Request, creds Creds) {
+	if creds == nil {
+		return
+	}
+	name, domain := creds.User()
+	req.Header.Set("cb-on-behalf-of",
+		base64.StdEncoding.EncodeToString([]byte(name+":"+domain)))
+
+	if extras := creds.Extras(); extras != "" {
+		req.Header.Set("cb-on-behalf-extras",
+			base64.StdEncoding.EncodeToString([]byte(extras)))
+	}
 }
 
 func duplicateStringsSlice(in []string) []string {
