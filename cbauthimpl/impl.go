@@ -1980,7 +1980,7 @@ func processResponseCredential(resp *http.Response) (interface{}, error) {
 		return nil, ErrCredentialNotFound
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("getCredential: read body: %v", err)
 	}
@@ -2100,7 +2100,7 @@ func GetCredential(s *Svc, id, user, domain, extras string) (*Credential, error)
 		return nil, err
 	}
 	defer hresp.Body.Close()
-	defer io.Copy(ioutil.Discard, hresp.Body)
+	defer io.Copy(io.Discard, hresp.Body)
 
 	val, err := processResponseCredential(hresp)
 	if err != nil {

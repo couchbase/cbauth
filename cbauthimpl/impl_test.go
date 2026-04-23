@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"runtime"
 	"sync"
@@ -183,7 +183,7 @@ func fakeResponse(statusCode int, body interface{}) *http.Response {
 	b, _ := json.Marshal(body)
 	return &http.Response{
 		StatusCode: statusCode,
-		Body:       ioutil.NopCloser(bytes.NewReader(b)),
+		Body:       io.NopCloser(bytes.NewReader(b)),
 		Header:     make(http.Header),
 	}
 }
