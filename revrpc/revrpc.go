@@ -359,12 +359,16 @@ func (p *DefaultErrorPolicy) try(err error) error {
 			if err == nil {
 				err = errors.New("Retries exceeded")
 			}
-			p.LogPrint("Will not retry on error: ", err)
+			if p.LogPrint != nil {
+				p.LogPrint("Will not retry on error: ", err)
+			}
 			return err
 		}
 	}
 
-	p.LogPrint(fmt.Sprintf("revrpc: Got error (%s) and will retry in %s", err, p.SleepBetweenRestarts))
+	if p.LogPrint != nil {
+		p.LogPrint(fmt.Sprintf("revrpc: Got error (%s) and will retry in %s", err, p.SleepBetweenRestarts))
+	}
 	time.Sleep(p.SleepBetweenRestarts)
 
 	return nil
