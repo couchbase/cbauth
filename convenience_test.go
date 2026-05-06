@@ -31,6 +31,9 @@ func (c *stubCreds) IsAllowedInternal(string) (bool, error)  { return false, nil
 func (c *stubCreds) GetBuckets() ([]string, error)           { return nil, nil }
 func (c *stubCreds) Expiry() int64                           { return 0 }
 func (c *stubCreds) Extras() string                          { return c.extras }
+func (c *stubCreds) GetCredential(string) (*Credential, error) { return nil, nil }
+
+var _ Creds = (*stubCreds)(nil)
 
 func newReq(t *testing.T) *http.Request {
 	req, err := http.NewRequest("GET", "http://example:8091/whatever", nil)
