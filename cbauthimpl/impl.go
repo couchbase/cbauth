@@ -637,7 +637,7 @@ type Svc struct {
 // have some defaults for them.
 const defaultUuidCacheSize = 256
 const defaultUserBktsCacheSize = 1024
-const defaultUpCacheSize = 1024
+const defaultUpCacheSize = 10240
 const defaultAuthCacheSize = 256
 const defaultClientCertCacheSize = 256
 
