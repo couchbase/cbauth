@@ -65,6 +65,43 @@ const (
 // callback function.
 type ConfigRefreshCallback func(uint64) error
 
+// CRLScope identifies which connection type a CRL policy applies to.
+type CRLScope string
+
+const (
+	CRLScopeClientAuth CRLScope = "clientAuth"
+	CRLScopeNodeToNode CRLScope = "nodeToNode"
+)
+
+// CRLPolicy controls how certificate revocation check results are handled.
+type CRLPolicy string
+
+const (
+	// CRLPolicyDisabled skips CRL checking entirely.
+	CRLPolicyDisabled CRLPolicy = "disabled"
+	// CRLPolicyPermissive aborts only when the certificate is known-revoked;
+	// undetermined status is allowed through.
+	CRLPolicyPermissive CRLPolicy = "permissive"
+	// CRLPolicyRequire aborts when the certificate is revoked or its status
+	// cannot be determined.
+	CRLPolicyRequire CRLPolicy = "require"
+)
+
+// CRLPolicyPerScope holds independent CRL policies for each connection scope.
+type CRLPolicyPerScope struct {
+	ClientAuth CRLPolicy `json:"clientAuth"`
+	NodeToNode CRLPolicy `json:"nodeToNode"`
+}
+
+func (p CRLPolicyPerScope) forScope(scope CRLScope) CRLPolicy {
+	switch scope {
+	case CRLScopeNodeToNode:
+		return p.NodeToNode
+	default:
+		return p.ClientAuth
+	}
+}
+
 // TLSConfig contains tls settings to be used by cbauth clients
 // When something in tls config changes user is notified via TLSRefreshCallback
 type TLSConfig struct {
@@ -78,6 +115,7 @@ type TLSConfig struct {
 	present                    bool
 	PrivateKeyPassphrase       []byte
 	ClientPrivateKeyPassphrase []byte
+	CRLPolicyPerScope          CRLPolicyPerScope
 }
 
 // ClusterEncryptionConfig contains info about whether to use SSL ports for
@@ -96,6 +134,7 @@ type tlsConfigImport struct {
 	Present                    bool
 	PrivateKeyPassphrase       []byte
 	ClientPrivateKeyPassphrase []byte
+	CRLPolicyPerScope          CRLPolicyPerScope `json:"crlPolicyPerScope"`
 }
 
 type CacheConfig struct {
@@ -240,6 +279,7 @@ type credsDB struct {
 	clientCertAuthVersion   string
 	clusterEncryptionConfig ClusterEncryptionConfig
 	tlsConfig               TLSConfig
+	crlsValidateURL         string
 	lastHeard               time.Time
 	cacheConfig             CacheConfig
 	guardrailStatuses       []GuardrailStatus
@@ -269,6 +309,7 @@ type Cache struct {
 	TLSConfig               tlsConfigImport         `json:"tlsConfig"`
 	CacheConfig             CacheConfig             `json:"cacheConfig"`
 	GuardrailStatuses       []GuardrailStatus       `json:"guardrailStatuses"`
+	CRLsValidateURL         string                  `json:"crlsValidateUrl"`
 }
 
 // Cache is a structure into which the revrpc json is unmarshalled if
@@ -664,6 +705,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		tlsConfig:               importTLSConfig(&c.TLSConfig, c.ClientCertAuthState),
 		cacheConfig:             c.CacheConfig,
 		guardrailStatuses:       c.GuardrailStatuses,
+		crlsValidateURL:         c.CRLsValidateURL,
 	}
 	return
 }
@@ -2225,6 +2267,118 @@ func GetGuardrailStatuses(s *Svc) ([]GuardrailStatus, error) {
 	return db.guardrailStatuses, nil
 }
 
+// CRLsValidate checks certificate revocation status against ns_server's CRL
+// endpoint. It is intended to be called from a tls.Config.VerifyPeerCertificate
+// callback. scope determines which CRL policy (clientAuth or nodeToNode) governs
+// the check.
+func CRLsValidate(s *Svc, rawCerts [][]byte, verifiedChains [][]*x509.Certificate, scope CRLScope) error {
+	db := fetchDB(s)
+	if db == nil {
+		return staleError(s)
+	}
+
+	policy := db.tlsConfig.CRLPolicyPerScope.forScope(scope)
+	if policy == CRLPolicyDisabled {
+		return nil
+	}
+
+	if db.crlsValidateURL == "" {
+		return fmt.Errorf("CRLsValidate: endpoint not configured")
+	}
+
+	encodedCerts := make([]string, len(rawCerts))
+	for i, raw := range rawCerts {
+		encodedCerts[i] = base64.StdEncoding.EncodeToString(raw)
+	}
+
+	reqBody := struct {
+		Certs []string `json:"certs"`
+		Scope CRLScope `json:"scope"`
+	}{
+		Certs: encodedCerts,
+		Scope: scope,
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("CRLsValidate: failed to marshal request: %w", err)
+	}
+
+	s.semaphore.wait()
+	defer s.semaphore.signal()
+
+	req, err := http.NewRequest("POST", db.crlsValidateURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("CRLsValidate: failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", userAgent)
+	if len(db.specialPasswords) > 0 {
+		req.SetBasicAuth(db.specialUser, db.specialPasswords[0])
+	}
+
+	v := url.Values{}
+	maybeSetClusterUUID(s, &v)
+	req.URL.RawQuery = v.Encode()
+
+	hresp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("CRLsValidate: request failed: %w", err)
+	}
+	defer hresp.Body.Close()
+	defer io.Copy(io.Discard, hresp.Body)
+
+	if hresp.StatusCode != 200 {
+		return fmt.Errorf("CRLsValidate: unexpected status %s", hresp.Status)
+	}
+
+	var resp struct {
+		Statuses []struct {
+			Status  string `json:"status"`
+			Subject string `json:"subject,omitempty"`
+			Details string `json:"details,omitempty"`
+		} `json:"statuses"`
+	}
+	if err := json.NewDecoder(hresp.Body).Decode(&resp); err != nil {
+		return fmt.Errorf(
+			"CRLsValidate: failed to decode response: %w", err)
+	}
+
+	if len(resp.Statuses) != len(rawCerts) {
+		return fmt.Errorf(
+			"CRLsValidate: response status count %d does not match "+
+				"requested cert count %d",
+			len(resp.Statuses), len(rawCerts))
+	}
+
+	for i, s := range resp.Statuses {
+		cert := fmt.Sprintf("cert %d", i)
+		if s.Subject != "" {
+			cert = s.Subject
+		}
+		switch s.Status {
+		case "valid":
+			continue
+		case "revoked":
+			return fmt.Errorf(
+				"CRLsValidate: %s is revoked: %s",
+				cert, s.Details)
+		case "undetermined":
+			return fmt.Errorf(
+				"CRLsValidate: %s status undetermined: %s",
+				cert, s.Details)
+		case "failed":
+			return fmt.Errorf(
+				"CRLsValidate: %s check failed: %s",
+				cert, s.Details)
+		default:
+			return fmt.Errorf(
+				"CRLsValidate: %s unknown status %q",
+				cert, s.Status)
+		}
+	}
+	return nil
+}
+
 func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig {
 	return TLSConfig{
 		MinVersion:               minTLSVersion(cfg.MinTLSVersion),
@@ -2238,6 +2392,7 @@ func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig
 		present:                    cfg.Present,
 		PrivateKeyPassphrase:       cfg.PrivateKeyPassphrase,
 		ClientPrivateKeyPassphrase: cfg.ClientPrivateKeyPassphrase,
+		CRLPolicyPerScope:          cfg.CRLPolicyPerScope,
 	}
 }
 

@@ -19,6 +19,7 @@ package cbauth
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net/http"
 
@@ -54,6 +55,26 @@ type ConfigRefreshCallback cbauthimpl.ConfigRefreshCallback
 // TLSConfig contains tls settings to be used by cbauth clients
 // When something in tls config changes user is notified via TLSRefreshCallback
 type TLSConfig cbauthimpl.TLSConfig
+
+// CRLScope identifies which connection type a CRL policy applies to.
+type CRLScope = cbauthimpl.CRLScope
+
+const (
+	CRLScopeClientAuth CRLScope = cbauthimpl.CRLScopeClientAuth
+	CRLScopeNodeToNode CRLScope = cbauthimpl.CRLScopeNodeToNode
+)
+
+// CRLPolicy controls how certificate revocation check results are handled.
+type CRLPolicy = cbauthimpl.CRLPolicy
+
+const (
+	CRLPolicyDisabled   CRLPolicy = cbauthimpl.CRLPolicyDisabled
+	CRLPolicyPermissive CRLPolicy = cbauthimpl.CRLPolicyPermissive
+	CRLPolicyRequire    CRLPolicy = cbauthimpl.CRLPolicyRequire
+)
+
+// CRLPolicyPerScope holds independent CRL policies for each connection scope.
+type CRLPolicyPerScope = cbauthimpl.CRLPolicyPerScope
 
 // ClusterEncryptionConfig contains info about whether to use SSL ports for
 // communication channels and whether to disable non-SSL ports.
@@ -124,6 +145,11 @@ type Authenticator interface {
 	// - Access collections metadata for any scope in the bucket
 	GetUserBuckets(user, domain string) ([]string, error)
 	GetGuardrailStatuses() (GuardrailStatuses, error)
+	// CRLsValidate checks certificate revocation status via ns_server.
+	// It is designed to be called from a tls.Config.VerifyPeerCertificate
+	// callback with the same rawCerts and verifiedChains arguments.
+	// scope selects which CRL policy to apply (clientAuth or nodeToNode).
+	CRLsValidate(rawCerts [][]byte, verifiedChains [][]*x509.Certificate, scope CRLScope) error
 }
 
 // Creds type represents credentials and answers queries on this creds
@@ -366,6 +392,10 @@ func (a *authImpl) GetUserBuckets(user, domain string) ([]string, error) {
 func (a *authImpl) GetGuardrailStatuses() (GuardrailStatuses, error) {
 	cfg, err := cbauthimpl.GetGuardrailStatuses(a.svc)
 	return GuardrailStatuses(cfg), err
+}
+
+func (a *authImpl) CRLsValidate(rawCerts [][]byte, verifiedChains [][]*x509.Certificate, scope CRLScope) error {
+	return cbauthimpl.CRLsValidate(a.svc, rawCerts, verifiedChains, scope)
 }
 
 var _ Authenticator = (*authImpl)(nil)

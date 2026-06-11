@@ -18,6 +18,7 @@ package cbauth
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -409,4 +410,15 @@ func ImportEncryptionKeys(dekPaths []string, dataType KeyDataType, timeout int) 
 		return ErrNotInitialized
 	}
 	return Default.ImportEncryptionKeys(dekPaths, dataType, timeout)
+}
+
+// CRLsValidate checks certificate revocation status for the given certificates
+// via ns_server's CRL endpoint. Designed to be called from a
+// tls.Config.VerifyPeerCertificate callback with the same rawCerts and
+// verifiedChains arguments. scope selects which CRL policy to apply.
+func CRLsValidate(rawCerts [][]byte, verifiedChains [][]*x509.Certificate, scope CRLScope) error {
+	if Default == nil {
+		return ErrNotInitialized
+	}
+	return Default.CRLsValidate(rawCerts, verifiedChains, scope)
 }
