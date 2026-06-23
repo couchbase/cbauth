@@ -46,6 +46,7 @@ const (
 	CFG_CHANGE_CLUSTER_ENCRYPTION
 	CFG_CHANGE_CLIENT_CERTS_TLSCONFIG
 	CFG_CHANGE_GUARDRAIL_STATUSES
+	CFG_CHANGE_CRL
 )
 
 // ConfigRefreshCallback type describes the callback that is called when there is

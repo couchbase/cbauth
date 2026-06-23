@@ -51,6 +51,7 @@ const (
 	CFG_CHANGE_CLUSTER_ENCRYPTION
 	CFG_CHANGE_CLIENT_CERTS_TLSCONFIG
 	CFG_CHANGE_GUARDRAIL_STATUSES
+	CFG_CHANGE_CRL
 	_MAX_CFG_CHANGE_FLAGS
 )
 
@@ -275,6 +276,7 @@ type credsDB struct {
 	authVersion             string
 	certVersion             int
 	clientCertVersion       int
+	crlVersion              int
 	extractUserFromCertURL  string
 	clientCertAuthVersion   string
 	clusterEncryptionConfig ClusterEncryptionConfig
@@ -302,6 +304,7 @@ type Cache struct {
 	AuthVersion             string
 	CertVersion             int
 	ClientCertVersion       int
+	CRLVersion              int
 	ExtractUserFromCertURL  string                  `json:"extractUserFromCertURL"`
 	ClientCertAuthState     string                  `json:"clientCertAuthState"`
 	ClientCertAuthVersion   string                  `json:"clientCertAuthVersion"`
@@ -699,6 +702,7 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		authVersion:             c.AuthVersion,
 		certVersion:             c.CertVersion,
 		clientCertVersion:       c.ClientCertVersion,
+		crlVersion:              c.CRLVersion,
 		extractUserFromCertURL:  c.ExtractUserFromCertURL,
 		clientCertAuthVersion:   c.ClientCertAuthVersion,
 		clusterEncryptionConfig: c.ClusterEncryptionConfig,
@@ -1279,6 +1283,10 @@ func (s *Svc) needConfigRefresh(db *credsDB) uint64 {
 		changes |= CFG_CHANGE_GUARDRAIL_STATUSES
 	}
 
+	if s.crlSettingsChanged(db) {
+		changes |= CFG_CHANGE_CRL
+	}
+
 	return changes
 }
 
@@ -1305,6 +1313,10 @@ func (s *Svc) clientTLSSettingsChanged(db *credsDB) bool {
 func (s *Svc) guardrailStatusesChanged(db *credsDB) bool {
 	return !reflect.DeepEqual(s.db.guardrailStatuses,
 		db.guardrailStatuses)
+}
+
+func (s *Svc) crlSettingsChanged(db *credsDB) bool {
+	return s.db.crlVersion != db.crlVersion
 }
 
 func fetchDB(s *Svc) *credsDB {
