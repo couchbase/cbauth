@@ -373,6 +373,11 @@ func RegisterManager(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy) error {
 // the ServiceAPI has been registered. This can be used by services to determine
 // when it is safe to continue bootstrapping if said bootstrapping requires use
 // of ns_server APIs that in turn require use of the ServiceAPI.
+//
+// NOTE: The ServiceAPI can be registered multiple times in a program's
+// lifecycle, e.g. it is reregistered if the connection to ns_server EOFs. This
+// means serviceSetupCallback can be invoked multiple times. Users should
+// ensure the callback does not block.
 func RegisterManagerWithCompletionCallback(mgr Manager, errorPolicy revrpc.BabysitErrorPolicy, serviceSetupCallback func() error) error {
 	service, err := revrpc.GetDefaultServiceFromEnv("service_api")
 	if err != nil {
