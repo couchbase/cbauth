@@ -492,6 +492,41 @@ func TestProcessResponseCredential_GCPSa(t *testing.T) {
 	}
 }
 
+func TestProcessResponseCredential_AWSInstanceMetadata(t *testing.T) {
+	wire := map[string]interface{}{
+		"id":            "backup/aws/imds",
+		"type":          "awsInstanceMetadata",
+		"schemaVersion": 1,
+		"meta": map[string]interface{}{
+			"createdAt": 1740000000000,
+			"createdBy": map[string]interface{}{
+				"user": "admin", "domain": "local",
+			},
+		},
+		"fields": map[string]interface{}{
+			"region":   "us-east-1",
+			"endpoint": "https://s3.example.com",
+		},
+	}
+	resp := fakeResponse(200, wire)
+	val, err := processResponseCredential(resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cred := val.(*Credential)
+	if cred.AWSInstanceMetadata == nil {
+		t.Fatal("AWSInstanceMetadata payload is nil")
+	}
+	if cred.AWSInstanceMetadata.Region != "us-east-1" {
+		t.Errorf("AWSInstanceMetadata.Region = %q",
+			cred.AWSInstanceMetadata.Region)
+	}
+	if cred.AWSInstanceMetadata.Endpoint != "https://s3.example.com" {
+		t.Errorf("AWSInstanceMetadata.Endpoint = %q",
+			cred.AWSInstanceMetadata.Endpoint)
+	}
+}
+
 func TestProcessResponseCredential_UnknownType(t *testing.T) {
 	wire := map[string]interface{}{
 		"id":            "future-cred",
@@ -570,7 +605,8 @@ func TestProcessResponseCredential_MetaAuthor(t *testing.T) {
 func TestUnmarshalCredentialFields_AllTypes(t *testing.T) {
 	// Verify every supported type can be dispatched without error.
 	types := []CredentialType{
-		CredentialTypeAWS, CredentialTypeAzureShared, CredentialTypeAzureAD,
+		CredentialTypeAWS, CredentialTypeAWSInstanceMetadata,
+		CredentialTypeAzureShared, CredentialTypeAzureAD,
 		CredentialTypeAzureSAS, CredentialTypeAzureManaged,
 		CredentialTypeGCP, CredentialTypeHTTP, CredentialTypeCouchbase,
 	}

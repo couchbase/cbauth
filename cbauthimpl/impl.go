@@ -1878,14 +1878,15 @@ type CredentialMeta struct {
 type CredentialType string
 
 const (
-	CredentialTypeAWS          CredentialType = "aws"
-	CredentialTypeAzureShared  CredentialType = "azureShared"
-	CredentialTypeAzureAD      CredentialType = "azureAd"
-	CredentialTypeAzureSAS     CredentialType = "azureSas"
-	CredentialTypeAzureManaged CredentialType = "azureManaged"
-	CredentialTypeGCP          CredentialType = "gcp"
-	CredentialTypeHTTP         CredentialType = "http"
-	CredentialTypeCouchbase    CredentialType = "couchbase"
+	CredentialTypeAWS                 CredentialType = "aws"
+	CredentialTypeAWSInstanceMetadata CredentialType = "awsInstanceMetadata"
+	CredentialTypeAzureShared         CredentialType = "azureShared"
+	CredentialTypeAzureAD             CredentialType = "azureAd"
+	CredentialTypeAzureSAS            CredentialType = "azureSas"
+	CredentialTypeAzureManaged        CredentialType = "azureManaged"
+	CredentialTypeGCP                 CredentialType = "gcp"
+	CredentialTypeHTTP                CredentialType = "http"
+	CredentialTypeCouchbase           CredentialType = "couchbase"
 )
 
 // AWSPayload holds AWS S3 / S3-compatible credential fields.
@@ -1895,6 +1896,14 @@ type AWSPayload struct {
 	Region          string `json:"region"`
 	Endpoint        string `json:"endpoint,omitempty"`
 	SessionToken    string `json:"sessionToken,omitempty"`
+}
+
+// AWSInstanceMetadataPayload holds AWS instance metadata credential fields.
+// The SDK authenticates via the EC2 instance metadata service, so no key
+// material is stored.
+type AWSInstanceMetadataPayload struct {
+	Region   string `json:"region"`
+	Endpoint string `json:"endpoint,omitempty"`
 }
 
 // AzureSharedPayload holds Azure Shared Key credential fields.
@@ -1979,14 +1988,15 @@ type Credential struct {
 	SchemaVersion int            `json:"schemaVersion"`
 	Meta          CredentialMeta `json:"meta"`
 
-	AWS          *AWSPayload          `json:"aws,omitempty"`
-	AzureShared  *AzureSharedPayload  `json:"azureShared,omitempty"`
-	AzureAD      *AzureADPayload      `json:"azureAd,omitempty"`
-	AzureSAS     *AzureSASPayload     `json:"azureSas,omitempty"`
-	AzureManaged *AzureManagedPayload `json:"azureManaged,omitempty"`
-	GCP          *GCPPayload          `json:"gcp,omitempty"`
-	HTTP         *HTTPPayload         `json:"http,omitempty"`
-	Couchbase    *CouchbasePayload    `json:"couchbase,omitempty"`
+	AWS                 *AWSPayload                 `json:"aws,omitempty"`
+	AWSInstanceMetadata *AWSInstanceMetadataPayload `json:"awsInstanceMetadata,omitempty"`
+	AzureShared         *AzureSharedPayload         `json:"azureShared,omitempty"`
+	AzureAD             *AzureADPayload             `json:"azureAd,omitempty"`
+	AzureSAS            *AzureSASPayload            `json:"azureSas,omitempty"`
+	AzureManaged        *AzureManagedPayload        `json:"azureManaged,omitempty"`
+	GCP                 *GCPPayload                 `json:"gcp,omitempty"`
+	HTTP                *HTTPPayload                `json:"http,omitempty"`
+	Couchbase           *CouchbasePayload           `json:"couchbase,omitempty"`
 }
 
 // unmarshalCredentialFields decodes JSON-encoded fields into the appropriate
@@ -1997,6 +2007,9 @@ func unmarshalCredentialFields(credType CredentialType, fieldsJSON []byte, cred 
 	case CredentialTypeAWS:
 		cred.AWS = &AWSPayload{}
 		return json.Unmarshal(fieldsJSON, cred.AWS)
+	case CredentialTypeAWSInstanceMetadata:
+		cred.AWSInstanceMetadata = &AWSInstanceMetadataPayload{}
+		return json.Unmarshal(fieldsJSON, cred.AWSInstanceMetadata)
 	case CredentialTypeAzureShared:
 		cred.AzureShared = &AzureSharedPayload{}
 		return json.Unmarshal(fieldsJSON, cred.AzureShared)

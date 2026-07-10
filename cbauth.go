@@ -191,14 +191,15 @@ type CredentialMeta = cbauthimpl.CredentialMeta
 type Credential = cbauthimpl.Credential
 
 const (
-	CredentialTypeAWS          = cbauthimpl.CredentialTypeAWS
-	CredentialTypeAzureShared  = cbauthimpl.CredentialTypeAzureShared
-	CredentialTypeAzureAD      = cbauthimpl.CredentialTypeAzureAD
-	CredentialTypeAzureSAS     = cbauthimpl.CredentialTypeAzureSAS
-	CredentialTypeAzureManaged = cbauthimpl.CredentialTypeAzureManaged
-	CredentialTypeGCP          = cbauthimpl.CredentialTypeGCP
-	CredentialTypeHTTP         = cbauthimpl.CredentialTypeHTTP
-	CredentialTypeCouchbase    = cbauthimpl.CredentialTypeCouchbase
+	CredentialTypeAWS                 = cbauthimpl.CredentialTypeAWS
+	CredentialTypeAWSInstanceMetadata = cbauthimpl.CredentialTypeAWSInstanceMetadata
+	CredentialTypeAzureShared         = cbauthimpl.CredentialTypeAzureShared
+	CredentialTypeAzureAD             = cbauthimpl.CredentialTypeAzureAD
+	CredentialTypeAzureSAS            = cbauthimpl.CredentialTypeAzureSAS
+	CredentialTypeAzureManaged        = cbauthimpl.CredentialTypeAzureManaged
+	CredentialTypeGCP                 = cbauthimpl.CredentialTypeGCP
+	CredentialTypeHTTP                = cbauthimpl.CredentialTypeHTTP
+	CredentialTypeCouchbase           = cbauthimpl.CredentialTypeCouchbase
 )
 
 type authImpl struct {
