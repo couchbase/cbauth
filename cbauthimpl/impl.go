@@ -117,6 +117,7 @@ type TLSConfig struct {
 	PrivateKeyPassphrase       []byte
 	ClientPrivateKeyPassphrase []byte
 	CRLPolicyPerScope          CRLPolicyPerScope
+	crlVersion                 int
 }
 
 // ClusterEncryptionConfig contains info about whether to use SSL ports for
@@ -136,6 +137,7 @@ type tlsConfigImport struct {
 	PrivateKeyPassphrase       []byte
 	ClientPrivateKeyPassphrase []byte
 	CRLPolicyPerScope          CRLPolicyPerScope `json:"crlPolicyPerScope"`
+	CRLVersion                 int               `json:"crlVersion"`
 }
 
 type CacheConfig struct {
@@ -276,7 +278,6 @@ type credsDB struct {
 	authVersion             string
 	certVersion             int
 	clientCertVersion       int
-	crlVersion              int
 	extractUserFromCertURL  string
 	clientCertAuthVersion   string
 	clusterEncryptionConfig ClusterEncryptionConfig
@@ -304,7 +305,6 @@ type Cache struct {
 	AuthVersion             string
 	CertVersion             int
 	ClientCertVersion       int
-	CRLVersion              int
 	ExtractUserFromCertURL  string                  `json:"extractUserFromCertURL"`
 	ClientCertAuthState     string                  `json:"clientCertAuthState"`
 	ClientCertAuthVersion   string                  `json:"clientCertAuthVersion"`
@@ -702,7 +702,6 @@ func cacheToCredsDB(c *Cache) (db *credsDB) {
 		authVersion:             c.AuthVersion,
 		certVersion:             c.CertVersion,
 		clientCertVersion:       c.ClientCertVersion,
-		crlVersion:              c.CRLVersion,
 		extractUserFromCertURL:  c.ExtractUserFromCertURL,
 		clientCertAuthVersion:   c.ClientCertAuthVersion,
 		clusterEncryptionConfig: c.ClusterEncryptionConfig,
@@ -1316,7 +1315,7 @@ func (s *Svc) guardrailStatusesChanged(db *credsDB) bool {
 }
 
 func (s *Svc) crlSettingsChanged(db *credsDB) bool {
-	return s.db.crlVersion != db.crlVersion
+	return s.db.tlsConfig.crlVersion != db.tlsConfig.crlVersion
 }
 
 func fetchDB(s *Svc) *credsDB {
@@ -2418,6 +2417,7 @@ func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig
 		PrivateKeyPassphrase:       cfg.PrivateKeyPassphrase,
 		ClientPrivateKeyPassphrase: cfg.ClientPrivateKeyPassphrase,
 		CRLPolicyPerScope:          cfg.CRLPolicyPerScope,
+		crlVersion:                 cfg.CRLVersion,
 	}
 }
 
