@@ -21,9 +21,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -146,6 +148,7 @@ type CacheConfig struct {
 	UpCacheSize         int `json:"upCacheSize"`
 	AuthCacheSize       int `json:"authCacheSize"`
 	ClientCertCacheSize int `json:"clientCertCacheSize"`
+	CRLCacheSize        int `json:"crlCacheSize"`
 }
 
 // GuardrailStatus contains the current status for a resource that we want
@@ -665,6 +668,8 @@ type Svc struct {
 	authCacheOnce       sync.Once
 	clientCertCache     *utils.Cache
 	clientCertCacheOnce sync.Once
+	crlCache            *utils.Cache
+	crlCacheOnce        sync.Once
 	httpClient          *http.Client
 	semaphore           semaphore
 	tlsNotifier         *tlsNotifier
@@ -684,6 +689,7 @@ const defaultUserBktsCacheSize = 1024
 const defaultUpCacheSize = 10240
 const defaultAuthCacheSize = 256
 const defaultClientCertCacheSize = 256
+const defaultCRLCacheSize = 1024
 
 func cacheToCredsDB(c *Cache) (db *credsDB) {
 	db = &credsDB{
@@ -795,6 +801,9 @@ func updateCacheSize(s *Svc, db *credsDB) {
 		}
 		if s.clientCertCache != nil {
 			s.clientCertCache.UpdateSize(db.cacheConfig.ClientCertCacheSize)
+		}
+		if s.crlCache != nil {
+			s.crlCache.UpdateSize(db.cacheConfig.CRLCacheSize)
 		}
 	}
 }
@@ -1156,6 +1165,9 @@ func (s *Svc) GetStats(Void, outparam *CachesStats) error {
 	cacheStats = append(cacheStats, *stats)
 
 	stats = getCacheStats("client_cert_cache", s.clientCertCache)
+	cacheStats = append(cacheStats, *stats)
+
+	stats = getCacheStats("cbauth_crl_cache", s.crlCache)
 	cacheStats = append(cacheStats, *stats)
 
 	(*outparam).CacheStats = cacheStats
@@ -2303,10 +2315,49 @@ func GetGuardrailStatuses(s *Svc) ([]GuardrailStatus, error) {
 	return db.guardrailStatuses, nil
 }
 
+// crlStatus is one entry in ns_server's CRLsValidate response. Expiration is an
+// ISO8601 timestamp until which the verdict may be cached, or nil (JSON null)
+// meaning the verdict never expires.
+type crlStatus struct {
+	Status     string  `json:"status"`
+	Subject    string  `json:"subject,omitempty"`
+	Details    string  `json:"details,omitempty"`
+	Expiration *string `json:"expiration"`
+}
+
+// crlCacheKey identifies a cached CRL verdict. version is db.tlsConfig.crlVersion
+// so that any CRL configuration change (which bumps the version) automatically
+// invalidates all previously cached verdicts, matching how the other cbauth
+// caches key on a config version.
+type crlCacheKey struct {
+	version int
+	scope   CRLScope
+	hash    string // sha256 over the DER-encoded certificate chain
+}
+
+// crlCacheEntry is a cached CRL verdict. err is the exact error returned to the
+// caller (nil means all certificates are valid). The verdict may be served from
+// cache until expiresAt, unless neverExpires is set.
+type crlCacheEntry struct {
+	err          error
+	expiresAt    time.Time
+	neverExpires bool
+}
+
+// crlFailedTTL bounds how long a "failed" (or unknown) verdict is cached.
+// Failures are often transient (e.g. a CRL that momentarily can't be fetched),
+// so they are cached only briefly regardless of the expiration ns_server
+// returns.
+const crlFailedTTL = time.Second
+
 // CRLsValidate checks certificate revocation status against ns_server's CRL
 // endpoint. It is intended to be called from a tls.Config.VerifyPeerCertificate
 // callback. scope determines which CRL policy (clientAuth or nodeToNode) governs
 // the check.
+//
+// Verdicts are cached (keyed by the CRL version, scope and certificate chain)
+// so repeated checks of the same chain don't contact ns_server. Each cached
+// verdict is honored only until the expiration ns_server returns for it.
 func CRLsValidate(s *Svc, rawCerts [][]byte, verifiedChains [][]*x509.Certificate, scope CRLScope) error {
 	db := fetchDB(s)
 	if db == nil {
@@ -2322,6 +2373,59 @@ func CRLsValidate(s *Svc, rawCerts [][]byte, verifiedChains [][]*x509.Certificat
 		return fmt.Errorf("CRLsValidate: endpoint not configured")
 	}
 
+	cacheSize := db.cacheConfig.CRLCacheSize
+	if cacheSize == 0 {
+		cacheSize = defaultCRLCacheSize
+	}
+	s.crlCacheOnce.Do(func() { s.crlCache = utils.NewCache(cacheSize) })
+
+	key := crlCacheKey{
+		version: db.tlsConfig.crlVersion,
+		scope:   scope,
+		hash:    hashCertChain(rawCerts),
+	}
+
+	if val, found := s.crlCache.Get(key); found {
+		entry := val.(crlCacheEntry)
+		if entry.neverExpires || time.Now().Before(entry.expiresAt) {
+			return entry.err
+		}
+		// Expired: fall through, re-query and refresh the entry via Set.
+	}
+
+	statuses, err := crlsValidateRequest(s, db, rawCerts, scope)
+	if err != nil {
+		// Transport/HTTP/decode errors are not cached; retry next call.
+		return err
+	}
+
+	entry, cache := crlVerdict(statuses)
+	if cache {
+		s.crlCache.Set(key, entry)
+	}
+	return entry.err
+}
+
+// hashCertChain returns a stable content hash of a raw certificate chain, used
+// as part of the CRL cache key. Each certificate is length-prefixed so that
+// distinct chains cannot produce the same hash by concatenation. sha256 is used
+// (rather than a weaker digest) so a revoked chain cannot be substituted for
+// another chain with a colliding hash.
+func hashCertChain(rawCerts [][]byte) string {
+	h := sha256.New()
+	var lenBuf [8]byte
+	for _, c := range rawCerts {
+		binary.BigEndian.PutUint64(lenBuf[:], uint64(len(c)))
+		h.Write(lenBuf[:])
+		h.Write(c)
+	}
+	return string(h.Sum(nil))
+}
+
+// crlsValidateRequest performs the ns_server CRL validation call and returns the
+// per-certificate statuses. Errors returned here are transport/protocol errors
+// that must not be cached.
+func crlsValidateRequest(s *Svc, db *credsDB, rawCerts [][]byte, scope CRLScope) ([]crlStatus, error) {
 	encodedCerts := make([]string, len(rawCerts))
 	for i, raw := range rawCerts {
 		encodedCerts[i] = base64.StdEncoding.EncodeToString(raw)
@@ -2336,7 +2440,7 @@ func CRLsValidate(s *Svc, rawCerts [][]byte, verifiedChains [][]*x509.Certificat
 	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return fmt.Errorf("CRLsValidate: failed to marshal request: %w", err)
+		return nil, fmt.Errorf("CRLsValidate: failed to marshal request: %w", err)
 	}
 
 	s.semaphore.wait()
@@ -2344,7 +2448,7 @@ func CRLsValidate(s *Svc, rawCerts [][]byte, verifiedChains [][]*x509.Certificat
 
 	req, err := http.NewRequest("POST", db.crlsValidateURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return fmt.Errorf("CRLsValidate: failed to create request: %w", err)
+		return nil, fmt.Errorf("CRLsValidate: failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", userAgent)
@@ -2358,61 +2462,128 @@ func CRLsValidate(s *Svc, rawCerts [][]byte, verifiedChains [][]*x509.Certificat
 
 	hresp, err := s.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("CRLsValidate: request failed: %w", err)
+		return nil, fmt.Errorf("CRLsValidate: request failed: %w", err)
 	}
 	defer hresp.Body.Close()
 	defer io.Copy(io.Discard, hresp.Body)
 
 	if hresp.StatusCode != 200 {
-		return fmt.Errorf("CRLsValidate: unexpected status %s", hresp.Status)
+		return nil, fmt.Errorf("CRLsValidate: unexpected status %s", hresp.Status)
 	}
 
 	var resp struct {
-		Statuses []struct {
-			Status  string `json:"status"`
-			Subject string `json:"subject,omitempty"`
-			Details string `json:"details,omitempty"`
-		} `json:"statuses"`
+		Statuses []crlStatus `json:"statuses"`
 	}
 	if err := json.NewDecoder(hresp.Body).Decode(&resp); err != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"CRLsValidate: failed to decode response: %w", err)
 	}
 
 	if len(resp.Statuses) != len(rawCerts) {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"CRLsValidate: response status count %d does not match "+
 				"requested cert count %d",
 			len(resp.Statuses), len(rawCerts))
 	}
 
-	for i, s := range resp.Statuses {
+	return resp.Statuses, nil
+}
+
+// crlVerdict turns ns_server's per-certificate statuses into a single cacheable
+// verdict. It mirrors the fail-on-first-non-valid semantics of the endpoint: the
+// returned error corresponds to the first non-valid certificate, or nil if all
+// certificates are valid. The bool result reports whether the verdict should be
+// cached (false when an expiration was present but unparseable).
+func crlVerdict(statuses []crlStatus) (crlCacheEntry, bool) {
+	for i, st := range statuses {
 		cert := fmt.Sprintf("cert %d", i)
-		if s.Subject != "" {
-			cert = s.Subject
+		if st.Subject != "" {
+			cert = st.Subject
 		}
-		switch s.Status {
+		switch st.Status {
 		case "valid":
 			continue
 		case "revoked":
-			return fmt.Errorf(
-				"CRLsValidate: %s is revoked: %s",
-				cert, s.Details)
+			return cacheableVerdict(
+				fmt.Errorf("CRLsValidate: %s is revoked: %s",
+					cert, st.Details), st.Expiration)
 		case "undetermined":
-			return fmt.Errorf(
-				"CRLsValidate: %s status undetermined: %s",
-				cert, s.Details)
+			return cacheableVerdict(
+				fmt.Errorf("CRLsValidate: %s status undetermined: %s",
+					cert, st.Details), st.Expiration)
 		case "failed":
-			return fmt.Errorf(
-				"CRLsValidate: %s check failed: %s",
-				cert, s.Details)
+			return crlCacheEntry{
+				err: fmt.Errorf("CRLsValidate: %s check failed: %s",
+					cert, st.Details),
+				expiresAt: time.Now().Add(crlFailedTTL),
+			}, true
 		default:
-			return fmt.Errorf(
-				"CRLsValidate: %s unknown status %q",
-				cert, s.Status)
+			return crlCacheEntry{
+				err: fmt.Errorf("CRLsValidate: %s unknown status %q",
+					cert, st.Status),
+				expiresAt: time.Now().Add(crlFailedTTL),
+			}, true
 		}
 	}
-	return nil
+
+	// All certificates valid: the verdict is trustworthy only until the
+	// earliest per-certificate expiration.
+	minExp := time.Time{}
+	haveExp := false
+	for _, st := range statuses {
+		t, kind := parseCRLExpiration(st.Expiration)
+		switch kind {
+		case crlExpiresInvalid:
+			return crlCacheEntry{}, false
+		case crlExpiresAt:
+			if !haveExp || t.Before(minExp) {
+				minExp = t
+				haveExp = true
+			}
+		}
+	}
+	if haveExp {
+		return crlCacheEntry{expiresAt: minExp}, true
+	}
+	return crlCacheEntry{neverExpires: true}, true
+}
+
+// cacheableVerdict builds a cache entry for a non-valid but cacheable verdict
+// (revoked/undetermined), honoring the returned expiration. A nil expiration
+// (JSON null) means the verdict never expires; an unparseable one means the
+// verdict must not be cached.
+func cacheableVerdict(err error, expiration *string) (crlCacheEntry, bool) {
+	t, kind := parseCRLExpiration(expiration)
+	switch kind {
+	case crlExpiresNever:
+		return crlCacheEntry{err: err, neverExpires: true}, true
+	case crlExpiresAt:
+		return crlCacheEntry{err: err, expiresAt: t}, true
+	default:
+		return crlCacheEntry{err: err}, false
+	}
+}
+
+type crlExpiryKind int
+
+const (
+	crlExpiresAt crlExpiryKind = iota
+	crlExpiresNever
+	crlExpiresInvalid
+)
+
+// parseCRLExpiration interprets the expiration field of a CRL status: nil (JSON
+// null) means "never expires", a valid ISO8601/RFC3339 timestamp yields that
+// time, and anything else is reported as invalid.
+func parseCRLExpiration(expiration *string) (time.Time, crlExpiryKind) {
+	if expiration == nil {
+		return time.Time{}, crlExpiresNever
+	}
+	t, err := time.Parse(time.RFC3339, *expiration)
+	if err != nil {
+		return time.Time{}, crlExpiresInvalid
+	}
+	return t, crlExpiresAt
 }
 
 func importTLSConfig(cfg *tlsConfigImport, ClientCertAuthState string) TLSConfig {

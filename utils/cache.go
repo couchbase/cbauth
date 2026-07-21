@@ -91,6 +91,33 @@ func (c *Cache) Add(key interface{}, value interface{}) bool {
 	return true
 }
 
+// Set inserts a key/value mapping, or overwrites the value if the key is
+// already present. Unlike Add, which leaves an existing mapping untouched, Set
+// updates the value in place while keeping the key's original eviction
+// position. This is useful for entries that need to be refreshed (e.g. cached
+// results that carry their own expiration).
+func (c *Cache) Set(key interface{}, value interface{}) {
+	c.Lock()
+	defer c.Unlock()
+
+	if _, exists := c.items.Load(key); exists {
+		c.items.Store(key, value)
+		return
+	}
+
+	c.items.Store(key, value)
+
+	if c.size < c.maxSize {
+		c.size++
+	} else {
+		victim := c.keys[c.nextKey]
+		c.items.Delete(victim)
+	}
+
+	c.keys[c.nextKey] = key
+	c.nextKey = (c.nextKey + 1) % c.maxSize
+}
+
 // UpdateSize updates the cache size. This function takes care of fragmentation
 // in keys after the update is done. Returns true if the cache size is updated
 // otherwise it returns false.

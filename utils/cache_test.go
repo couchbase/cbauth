@@ -473,6 +473,59 @@ func TestCacheSizeDecrease_FullCacheWithRotation2(t *testing.T) {
 	}
 }
 
+func TestCacheSetOverwrite(t *testing.T) {
+	c := NewCache(4)
+
+	// New key inserted via Set.
+	c.Set(1, "a")
+	if v, ok := c.Get(1); !ok || v != "a" {
+		t.Fatalf("expected (a, true), got (%v, %v)", v, ok)
+	}
+
+	// Set on an existing key overwrites the value in place without adding a
+	// new eviction slot.
+	c.Set(1, "b")
+	if v, ok := c.Get(1); !ok || v != "b" {
+		t.Fatalf("expected (b, true) after overwrite, got (%v, %v)", v, ok)
+	}
+	if c.size != 1 {
+		t.Fatalf("overwrite should not grow the cache, size=%d", c.size)
+	}
+
+	// Add must not overwrite (contrast with Set).
+	if c.Add(1, "c") {
+		t.Fatalf("Add should report false for an existing key")
+	}
+	if v, _ := c.Get(1); v != "b" {
+		t.Fatalf("Add must not overwrite, got %v", v)
+	}
+}
+
+func TestCacheSetEviction(t *testing.T) {
+	// Set on new keys must evict in insertion order exactly like Add.
+	size := 4
+	cSet := NewCache(size)
+	cAdd := NewCache(size)
+
+	for i := 0; i < size*2; i++ {
+		cSet.Set(i, i+13)
+		cAdd.Add(i, i+13)
+	}
+
+	for i := 0; i < size*2; i++ {
+		vSet, okSet := cSet.Get(i)
+		vAdd, okAdd := cAdd.Get(i)
+		if okSet != okAdd || vSet != vAdd {
+			t.Fatalf("Set/Add disagree for key %d: Set=(%v,%v) Add=(%v,%v)",
+				i, vSet, okSet, vAdd, okAdd)
+		}
+	}
+
+	if cSet.size != size {
+		t.Fatalf("bad size after eviction: %d, expected %d", cSet.size, size)
+	}
+}
+
 func checkCacheProperties(t *testing.T, c *Cache,
 	orgMaxSize int, expMaxSize int, expSize int) {
 
