@@ -608,7 +608,8 @@ func TestUnmarshalCredentialFields_AllTypes(t *testing.T) {
 		CredentialTypeAWS, CredentialTypeAWSInstanceMetadata,
 		CredentialTypeAzureShared, CredentialTypeAzureAD,
 		CredentialTypeAzureSAS, CredentialTypeAzureManaged,
-		CredentialTypeGCP, CredentialTypeHTTP, CredentialTypeCouchbase,
+		CredentialTypeGCP, CredentialTypeGCPADC, CredentialTypeHTTP,
+		CredentialTypeCouchbase,
 	}
 	for _, typ := range types {
 		t.Run(string(typ), func(t *testing.T) {

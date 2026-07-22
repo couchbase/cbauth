@@ -198,6 +198,7 @@ const (
 	CredentialTypeAzureSAS            = cbauthimpl.CredentialTypeAzureSAS
 	CredentialTypeAzureManaged        = cbauthimpl.CredentialTypeAzureManaged
 	CredentialTypeGCP                 = cbauthimpl.CredentialTypeGCP
+	CredentialTypeGCPADC              = cbauthimpl.CredentialTypeGCPADC
 	CredentialTypeHTTP                = cbauthimpl.CredentialTypeHTTP
 	CredentialTypeCouchbase           = cbauthimpl.CredentialTypeCouchbase
 )

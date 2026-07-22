@@ -1884,6 +1884,7 @@ const (
 	CredentialTypeAzureSAS            CredentialType = "azureSas"
 	CredentialTypeAzureManaged        CredentialType = "azureManaged"
 	CredentialTypeGCP                 CredentialType = "gcp"
+	CredentialTypeGCPADC              CredentialType = "gcpAdc"
 	CredentialTypeHTTP                CredentialType = "http"
 	CredentialTypeCouchbase           CredentialType = "couchbase"
 )
@@ -1953,6 +1954,13 @@ type GCPPayload struct {
 	Endpoint string `json:"endpoint,omitempty"`
 }
 
+// GCPADCPayload holds GCP Application Default Credentials fields.  The SDK
+// resolves credentials from the runtime environment (e.g. the GCE/GKE
+// attached service account), so no key material is stored and there are no
+// fields.
+type GCPADCPayload struct {
+}
+
 // HTTPPayload holds generic HTTP credential fields.
 type HTTPPayload struct {
 	AuthScheme      string `json:"authScheme"` // "basic", "bearer", "mtls"
@@ -1994,6 +2002,7 @@ type Credential struct {
 	AzureSAS            *AzureSASPayload            `json:"azureSas,omitempty"`
 	AzureManaged        *AzureManagedPayload        `json:"azureManaged,omitempty"`
 	GCP                 *GCPPayload                 `json:"gcp,omitempty"`
+	GCPADC              *GCPADCPayload              `json:"gcpAdc,omitempty"`
 	HTTP                *HTTPPayload                `json:"http,omitempty"`
 	Couchbase           *CouchbasePayload           `json:"couchbase,omitempty"`
 }
@@ -2024,6 +2033,9 @@ func unmarshalCredentialFields(credType CredentialType, fieldsJSON []byte, cred 
 	case CredentialTypeGCP:
 		cred.GCP = &GCPPayload{}
 		return json.Unmarshal(fieldsJSON, cred.GCP)
+	case CredentialTypeGCPADC:
+		cred.GCPADC = &GCPADCPayload{}
+		return json.Unmarshal(fieldsJSON, cred.GCPADC)
 	case CredentialTypeHTTP:
 		cred.HTTP = &HTTPPayload{}
 		return json.Unmarshal(fieldsJSON, cred.HTTP)
