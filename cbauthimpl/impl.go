@@ -2361,6 +2361,9 @@ const crlFailedTTL = time.Second
 // Verdicts are cached (keyed by the CRL version, scope and certificate chain)
 // so repeated checks of the same chain don't contact ns_server. Each cached
 // verdict is honored only until the expiration ns_server returns for it.
+//
+// It returns nil without contacting ns_server when the policy for scope is
+// disabled, and when the peer presented no certificate at all.
 func CRLsValidate(s *Svc, rawCerts [][]byte, verifiedChains [][]*x509.Certificate, scope CRLScope) error {
 	db := fetchDB(s)
 	if db == nil {
@@ -2369,6 +2372,15 @@ func CRLsValidate(s *Svc, rawCerts [][]byte, verifiedChains [][]*x509.Certificat
 
 	policy := db.tlsConfig.CRLPolicyPerScope.forScope(scope)
 	if policy == CRLPolicyDisabled {
+		return nil
+	}
+
+	// A peer that presented no certificate has no revocation status to check.
+	// tls.VerifyClientCertIfGiven (clientCertAuthState "enable" or "hybrid")
+	// still invokes VerifyPeerCertificate in that case, with an empty chain,
+	// and ns_server rejects an empty certs list outright, so this has to be
+	// handled here rather than turned into a failed handshake.
+	if len(rawCerts) == 0 {
 		return nil
 	}
 
