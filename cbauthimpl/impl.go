@@ -99,13 +99,27 @@ type CRLPolicyPerScope struct {
 	NodeToNode CRLPolicy `json:"nodeToNode"`
 }
 
-func (p CRLPolicyPerScope) forScope(scope CRLScope) CRLPolicy {
+// forScope returns the CRL policy configured for scope. Both scope and the
+// policy ns_server sent for it have to be exactly one of the defined constants:
+// an unknown scope means the caller passed a bad argument, and an unknown or
+// empty policy means CRL settings never arrived, and neither is quietly treated
+// as "no CRL checking".
+func (p CRLPolicyPerScope) forScope(scope CRLScope) (CRLPolicy, error) {
+	var policy CRLPolicy
 	switch scope {
+	case CRLScopeClientAuth:
+		policy = p.ClientAuth
 	case CRLScopeNodeToNode:
-		return p.NodeToNode
+		policy = p.NodeToNode
 	default:
-		return p.ClientAuth
+		return "", fmt.Errorf("invalid scope %q", scope)
 	}
+
+	switch policy {
+	case CRLPolicyDisabled, CRLPolicyPermissive, CRLPolicyRequire:
+		return policy, nil
+	}
+	return "", fmt.Errorf("invalid CRL policy %q for scope %q", policy, scope)
 }
 
 // TLSConfig contains tls settings to be used by cbauth clients
@@ -2370,7 +2384,10 @@ func CRLsValidate(s *Svc, rawCerts [][]byte, verifiedChains [][]*x509.Certificat
 		return staleError(s)
 	}
 
-	policy := db.tlsConfig.CRLPolicyPerScope.forScope(scope)
+	policy, err := db.tlsConfig.CRLPolicyPerScope.forScope(scope)
+	if err != nil {
+		return fmt.Errorf("CRLsValidate: %w", err)
+	}
 	if policy == CRLPolicyDisabled {
 		return nil
 	}
