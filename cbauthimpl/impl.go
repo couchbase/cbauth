@@ -77,17 +77,20 @@ const (
 )
 
 // CRLPolicy controls how certificate revocation check results are handled.
+// These values are the wire format ns_server pushes in
+// tlsConfig.crlPolicyPerScope, so they must stay in sync with
+// crl_mode_to_binary/1 in ns_server's menelaus_cbauth.erl.
 type CRLPolicy string
 
 const (
 	// CRLPolicyDisabled skips CRL checking entirely.
-	CRLPolicyDisabled CRLPolicy = "disabled"
+	CRLPolicyDisabled CRLPolicy = "Disabled"
 	// CRLPolicyPermissive aborts only when the certificate is known-revoked;
 	// undetermined status is allowed through.
-	CRLPolicyPermissive CRLPolicy = "permissive"
+	CRLPolicyPermissive CRLPolicy = "Permissive"
 	// CRLPolicyRequire aborts when the certificate is revoked or its status
 	// cannot be determined.
-	CRLPolicyRequire CRLPolicy = "require"
+	CRLPolicyRequire CRLPolicy = "Require"
 )
 
 // CRLPolicyPerScope holds independent CRL policies for each connection scope.
