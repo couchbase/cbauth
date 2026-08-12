@@ -228,6 +228,9 @@ var ErrNoAuth = cbauthimpl.ErrNoAuth
 // empty
 var ErrNoUuid = cbauthimpl.ErrNoUuid
 
+// ErrUserNotFound is used to signal when username can't be extracted from client certificate.
+var ErrUserNotFound = cbauthimpl.ErrUserNotFound
+
 // ErrCredentialsExpired is returned when credentials have expired
 var ErrCredentialsExpired = cbauthimpl.ErrCredentialsExpired
 
