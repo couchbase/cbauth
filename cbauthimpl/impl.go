@@ -512,20 +512,23 @@ func (s semaphore) wait() {
 	s <- 1
 }
 
+const cfgChangeRetryInterval = 5 * time.Second
+
 type cfgChangeNotifier struct {
 	l sync.Mutex
-	// The flags not yet delivered to the callback. They are kept here rather
-	// than carried by ch, which only has room for one notification and so used
-	// to drop the flags of every notification that arrived while one was
-	// already queued.
-	pending  uint64
-	ch       chan struct{}
-	callback ConfigRefreshCallback
+	// The flags still owed to the callback. They are kept here rather than
+	// carried by ch so that nothing can discard flags that a coalesced
+	// notification, or a callback that failed, has yet to deliver.
+	pending       uint64
+	ch            chan struct{}
+	callback      ConfigRefreshCallback
+	retryInterval time.Duration
 }
 
 func newCfgChangeNotifier() *cfgChangeNotifier {
 	return &cfgChangeNotifier{
-		ch: make(chan struct{}, 1),
+		ch:            make(chan struct{}, 1),
+		retryInterval: cfgChangeRetryInterval,
 	}
 }
 
@@ -554,6 +557,14 @@ func (n *cfgChangeNotifier) takePending() uint64 {
 	changes := n.pending
 	n.pending = 0
 	return changes
+}
+
+// requeuePending takes flags back after a delivery attempt failed.
+func (n *cfgChangeNotifier) requeuePending(changes uint64) {
+	n.l.Lock()
+	defer n.l.Unlock()
+
+	n.pending |= changes
 }
 
 func (n *cfgChangeNotifier) registerCallback(callback ConfigRefreshCallback) error {
@@ -587,26 +598,25 @@ func (n *cfgChangeNotifier) maybeExecuteCallback(changes uint64) error {
 
 func (n *cfgChangeNotifier) loop() {
 	retry := (<-chan time.Time)(nil)
-	var changes uint64 = 0
 
 	for {
 		select {
 		case <-retry:
-			retry = nil
 		case <-n.ch:
-			changes = n.takePending()
 		}
+		retry = nil
 
-		err := n.maybeExecuteCallback(changes)
-
-		if err == nil {
-			retry = nil
-			changes = 0
+		changes := n.takePending()
+		if changes == 0 {
 			continue
 		}
 
-		if retry == nil {
-			retry = time.After(5 * time.Second)
+		if err := n.maybeExecuteCallback(changes); err != nil {
+			// The callback did not act on them, so they are still owed. Any
+			// notification arriving from now on joins this set rather than
+			// replacing it.
+			n.requeuePending(changes)
+			retry = time.After(n.retryInterval)
 		}
 	}
 }

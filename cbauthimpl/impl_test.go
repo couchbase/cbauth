@@ -668,13 +668,14 @@ func (r *cfgChangeRecorder) finish(t *testing.T, err error) {
 }
 
 // startCfgChangeNotifier returns a running notifier with the recorder
-// registered. The all-flags invocation that registerCallback triggers is left
-// for the test to consume.
-func startCfgChangeNotifier(t *testing.T) (*cfgChangeNotifier,
-	*cfgChangeRecorder) {
+// registered, having already consumed the all-flags invocation that
+// registerCallback triggers.
+func startCfgChangeNotifier(t *testing.T,
+	retryInterval time.Duration) (*cfgChangeNotifier, *cfgChangeRecorder) {
 	t.Helper()
 
 	n := newCfgChangeNotifier()
+	n.retryInterval = retryInterval
 	rec := newCfgChangeRecorder()
 	// Unblocks a callback still in flight when the test ends: a receive from a
 	// closed channel yields a nil error.
@@ -688,7 +689,7 @@ func startCfgChangeNotifier(t *testing.T) (*cfgChangeNotifier,
 }
 
 func TestCfgChangeNotifierRegisterDeliversAllFlags(t *testing.T) {
-	_, rec := startCfgChangeNotifier(t)
+	_, rec := startCfgChangeNotifier(t, time.Hour)
 
 	got := rec.nextInvocation(t)
 	rec.finish(t, nil)
@@ -702,7 +703,7 @@ func TestCfgChangeNotifierRegisterDeliversAllFlags(t *testing.T) {
 // used to be handed to the callback through a one-slot channel, so only the
 // first of them survived and the rest were dropped.
 func TestCfgChangeNotifierAccumulatesFlags(t *testing.T) {
-	n, rec := startCfgChangeNotifier(t)
+	n, rec := startCfgChangeNotifier(t, time.Hour)
 
 	rec.nextInvocation(t)
 
@@ -724,5 +725,55 @@ func TestCfgChangeNotifierAccumulatesFlags(t *testing.T) {
 	if got != want {
 		t.Errorf("after %d notifications the callback got %#b, want %#b",
 			len(fired), got, want)
+	}
+}
+
+// A callback that failed still owes its flags, so an unrelated notification
+// must not take its place. It used to overwrite it, which meant a certificate
+// reload that failed once was never retried and the service silently kept the
+// old key pair.
+func TestCfgChangeNotifierKeepsFailedFlags(t *testing.T) {
+	// Long enough that only the notification below can drive the next
+	// invocation, which is the case this is about.
+	n, rec := startCfgChangeNotifier(t, time.Hour)
+
+	rec.nextInvocation(t)
+	rec.finish(t, nil)
+
+	n.notifyCfgChange(CFG_CHANGE_CERTS_TLSCONFIG)
+	if got := rec.nextInvocation(t); got != CFG_CHANGE_CERTS_TLSCONFIG {
+		t.Fatalf("first invocation got %#b, want %#b",
+			got, CFG_CHANGE_CERTS_TLSCONFIG)
+	}
+	rec.finish(t, errors.New("could not load the key pair"))
+
+	n.notifyCfgChange(CFG_CHANGE_GUARDRAIL_STATUSES)
+
+	got := rec.nextInvocation(t)
+	rec.finish(t, nil)
+
+	want := uint64(CFG_CHANGE_CERTS_TLSCONFIG | CFG_CHANGE_GUARDRAIL_STATUSES)
+	if got != want {
+		t.Errorf("after a failure the callback got %#b, want %#b", got, want)
+	}
+}
+
+func TestCfgChangeNotifierRetriesWithoutNotification(t *testing.T) {
+	n, rec := startCfgChangeNotifier(t, 5*time.Millisecond)
+
+	rec.nextInvocation(t)
+	rec.finish(t, nil)
+
+	n.notifyCfgChange(CFG_CHANGE_CERTS_TLSCONFIG)
+	rec.nextInvocation(t)
+	rec.finish(t, errors.New("could not load the key pair"))
+
+	// Nothing else is notified: the retry timer has to bring it back.
+	got := rec.nextInvocation(t)
+	rec.finish(t, nil)
+
+	if got != CFG_CHANGE_CERTS_TLSCONFIG {
+		t.Errorf("retry delivered %#b, want %#b",
+			got, CFG_CHANGE_CERTS_TLSCONFIG)
 	}
 }
