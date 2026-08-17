@@ -513,20 +513,28 @@ func (s semaphore) wait() {
 }
 
 type cfgChangeNotifier struct {
-	l        sync.Mutex
-	ch       chan uint64
+	l sync.Mutex
+	// The flags not yet delivered to the callback. They are kept here rather
+	// than carried by ch, which only has room for one notification and so used
+	// to drop the flags of every notification that arrived while one was
+	// already queued.
+	pending  uint64
+	ch       chan struct{}
 	callback ConfigRefreshCallback
 }
 
 func newCfgChangeNotifier() *cfgChangeNotifier {
 	return &cfgChangeNotifier{
-		ch: make(chan uint64, 1),
+		ch: make(chan struct{}, 1),
 	}
 }
 
 func (n *cfgChangeNotifier) notifyCfgChangeLocked(changes uint64) {
+	n.pending |= changes
+	// Just a wake-up: the flags are in n.pending, so dropping a token that the
+	// loop has not picked up yet loses nothing.
 	select {
-	case n.ch <- changes:
+	case n.ch <- struct{}{}:
 	default:
 	}
 }
@@ -535,6 +543,17 @@ func (n *cfgChangeNotifier) notifyCfgChange(changes uint64) {
 	n.l.Lock()
 	defer n.l.Unlock()
 	n.notifyCfgChangeLocked(changes)
+}
+
+// takePending hands the flags accumulated so far to the caller, which then owes
+// their delivery to the callback.
+func (n *cfgChangeNotifier) takePending() uint64 {
+	n.l.Lock()
+	defer n.l.Unlock()
+
+	changes := n.pending
+	n.pending = 0
+	return changes
 }
 
 func (n *cfgChangeNotifier) registerCallback(callback ConfigRefreshCallback) error {
@@ -574,7 +593,8 @@ func (n *cfgChangeNotifier) loop() {
 		select {
 		case <-retry:
 			retry = nil
-		case changes = <-n.ch:
+		case <-n.ch:
+			changes = n.takePending()
 		}
 
 		err := n.maybeExecuteCallback(changes)

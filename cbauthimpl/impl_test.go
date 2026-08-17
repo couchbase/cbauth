@@ -621,3 +621,108 @@ func TestUnmarshalCredentialFields_AllTypes(t *testing.T) {
 		})
 	}
 }
+
+// cfgChangeRecorder drives a cfgChangeNotifier from a test. It records every
+// flag word the callback is handed, and lets the test decide, per invocation,
+// whether the callback succeeds, fails, or stays in flight while the test does
+// something else.
+type cfgChangeRecorder struct {
+	entered chan uint64
+	release chan error
+}
+
+func newCfgChangeRecorder() *cfgChangeRecorder {
+	return &cfgChangeRecorder{
+		// Buffered so the callback never blocks announcing itself; the test
+		// controls timing through release.
+		entered: make(chan uint64, 16),
+		release: make(chan error),
+	}
+}
+
+func (r *cfgChangeRecorder) callback(changes uint64) error {
+	r.entered <- changes
+	return <-r.release
+}
+
+// nextInvocation waits for the callback to be entered and reports the flags it
+// was given. It does not let the callback return; call finish for that.
+func (r *cfgChangeRecorder) nextInvocation(t *testing.T) uint64 {
+	t.Helper()
+	select {
+	case changes := <-r.entered:
+		return changes
+	case <-time.After(5 * time.Second):
+		t.Fatal("the config refresh callback was not called")
+		return 0
+	}
+}
+
+func (r *cfgChangeRecorder) finish(t *testing.T, err error) {
+	t.Helper()
+	select {
+	case r.release <- err:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the config refresh callback did not take its result")
+	}
+}
+
+// startCfgChangeNotifier returns a running notifier with the recorder
+// registered. The all-flags invocation that registerCallback triggers is left
+// for the test to consume.
+func startCfgChangeNotifier(t *testing.T) (*cfgChangeNotifier,
+	*cfgChangeRecorder) {
+	t.Helper()
+
+	n := newCfgChangeNotifier()
+	rec := newCfgChangeRecorder()
+	// Unblocks a callback still in flight when the test ends: a receive from a
+	// closed channel yields a nil error.
+	t.Cleanup(func() { close(rec.release) })
+
+	go n.loop()
+	if err := n.registerCallback(rec.callback); err != nil {
+		t.Fatalf("registerCallback: %v", err)
+	}
+	return n, rec
+}
+
+func TestCfgChangeNotifierRegisterDeliversAllFlags(t *testing.T) {
+	_, rec := startCfgChangeNotifier(t)
+
+	got := rec.nextInvocation(t)
+	rec.finish(t, nil)
+
+	if want := uint64(_MAX_CFG_CHANGE_FLAGS - 1); got != want {
+		t.Errorf("registration delivered %#b, want %#b", got, want)
+	}
+}
+
+// Notifications arriving while the callback is in flight must accumulate. They
+// used to be handed to the callback through a one-slot channel, so only the
+// first of them survived and the rest were dropped.
+func TestCfgChangeNotifierAccumulatesFlags(t *testing.T) {
+	n, rec := startCfgChangeNotifier(t)
+
+	rec.nextInvocation(t)
+
+	fired := []uint64{
+		CFG_CHANGE_CERTS_TLSCONFIG,
+		CFG_CHANGE_CLIENT_CERTS_TLSCONFIG,
+		CFG_CHANGE_GUARDRAIL_STATUSES,
+	}
+	var want uint64
+	for _, changes := range fired {
+		n.notifyCfgChange(changes)
+		want |= changes
+	}
+	rec.finish(t, nil)
+
+	got := rec.nextInvocation(t)
+	rec.finish(t, nil)
+
+	if got != want {
+		t.Errorf("after %d notifications the callback got %#b, want %#b",
+			len(fired), got, want)
+	}
+}
