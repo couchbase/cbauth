@@ -2406,9 +2406,20 @@ const crlFailedTTL = time.Second
 // so repeated checks of the same chain don't contact ns_server. Each cached
 // verdict is honored only until the expiration ns_server returns for it.
 //
-// It returns nil without contacting ns_server when the policy for scope is
-// disabled, and when the peer presented no certificate at all.
+// A peer that presented no certificate always passes; the policy for scope is
+// only consulted for a peer that did present one. Beyond that it returns nil
+// without contacting ns_server when the policy for scope is disabled.
 func CRLsValidate(s *Svc, rawCerts [][]byte, verifiedChains [][]*x509.Certificate, scope CRLScope) error {
+	// When cbauth loses its connection to ns_server the db goes
+	// stale, and crypto/tls calls this for every client presenting no
+	// certificate. Those have nothing to verify, so they must keep working -
+	// hence the check comes before the staleness one below. A peer that did
+	// present a certificate fails there instead: its revocation status cannot
+	// be established while the db is stale.
+	if len(rawCerts) == 0 {
+		return nil
+	}
+
 	db := fetchDB(s)
 	if db == nil {
 		return staleError(s)
@@ -2419,15 +2430,6 @@ func CRLsValidate(s *Svc, rawCerts [][]byte, verifiedChains [][]*x509.Certificat
 		return fmt.Errorf("CRLsValidate: %w", err)
 	}
 	if policy == CRLPolicyDisabled {
-		return nil
-	}
-
-	// A peer that presented no certificate has no revocation status to check.
-	// tls.VerifyClientCertIfGiven (clientCertAuthState "enable" or "hybrid")
-	// still invokes VerifyPeerCertificate in that case, with an empty chain,
-	// and ns_server rejects an empty certs list outright, so this has to be
-	// handled here rather than turned into a failed handshake.
-	if len(rawCerts) == 0 {
 		return nil
 	}
 

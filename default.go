@@ -416,7 +416,14 @@ func ImportEncryptionKeys(dekPaths []string, dataType KeyDataType, timeout int) 
 // via ns_server's CRL endpoint. Designed to be called from a
 // tls.Config.VerifyPeerCertificate callback with the same rawCerts and
 // verifiedChains arguments. scope selects which CRL policy to apply.
+//
+// A client presenting no certificate passes before cbauth is initialized too:
+// there is nothing to verify, and failing here would drop the connection. See
+// cbauthimpl.CRLsValidate.
 func CRLsValidate(rawCerts [][]byte, verifiedChains [][]*x509.Certificate, scope CRLScope) error {
+	if len(rawCerts) == 0 {
+		return nil
+	}
 	if Default == nil {
 		return ErrNotInitialized
 	}
