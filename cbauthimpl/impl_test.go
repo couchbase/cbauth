@@ -209,9 +209,6 @@ func TestProcessResponseCredential_AWS(t *testing.T) {
 					"allowedUrls":    []string{"https://s3.amazonaws.com/*"},
 					"disallowedUrls": []string{"https://bad.example.com"},
 				},
-				"allowedOperations": []string{
-					"READ", "WRITE",
-				},
 			},
 		},
 		"fields": map[string]interface{}{
@@ -252,11 +249,6 @@ func TestProcessResponseCredential_AWS(t *testing.T) {
 		t.Errorf(
 			"Meta.Guardrails.AllowedServices = %v",
 			cred.Meta.Guardrails.AllowedServices)
-	}
-	if len(cred.Meta.Guardrails.AllowedOperations) != 2 {
-		t.Errorf(
-			"Meta.Guardrails.AllowedOperations = %v",
-			cred.Meta.Guardrails.AllowedOperations)
 	}
 	wl := cred.Meta.Guardrails.URLWhitelist
 	if wl == nil {

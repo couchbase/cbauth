@@ -1907,10 +1907,8 @@ type URLWhitelist struct {
 // must enforce at runtime. ns_server enforces only AllowedServices;
 // all other guardrails are the service's responsibility.
 type CredentialGuardrails struct {
-	AllowedServices   []string      `json:"allowedServices,omitempty"`
-	URLWhitelist      *URLWhitelist `json:"urlWhitelist,omitempty"`
-	AllowedResources  []string      `json:"allowedResources,omitempty"`
-	AllowedOperations []string      `json:"allowedOperations,omitempty"`
+	AllowedServices []string      `json:"allowedServices,omitempty"`
+	URLWhitelist    *URLWhitelist `json:"urlWhitelist,omitempty"`
 }
 
 // CredentialMeta holds the metadata returned for a credential.
