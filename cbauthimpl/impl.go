@@ -927,10 +927,19 @@ func (s *Svc) GetInUseKeys(c *KeyDataType, outparam *[]string) error {
 		if err := waitCallbacksRegistered(s); err != nil {
 			return err
 		}
+		key, err := normalizedKeyDataType(*c)
+		if err != nil {
+			return err
+		}
 		s.l.RLock()
 		// callback can't be null because waitCallbacksRegistered is called above
 		callback := s.keysDb.getInUseKeysCallback
-		keysInitialized := (s.keysDb.encrKeys != nil)
+		// The check has to be per data type. The map is allocated by the first
+		// UpdateKeysDB for any data type, so a non-empty map says nothing about
+		// this one. Reporting the keys as set while they are missing sends the
+		// caller into the service callback, which then blocks priming this data
+		// type until its context expires.
+		keysInitialized := s.keysDb.encrKeys != nil && s.keysDb.encrKeys[key] != nil
 		s.l.RUnlock()
 		if !keysInitialized {
 			return errors.New("keys-not-set")
