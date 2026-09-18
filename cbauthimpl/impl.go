@@ -1400,7 +1400,7 @@ func VerifyPassword(s *Svc, user, password string) (*CredsImpl, error) {
 
 	if rv.domain == "admin" || rv.domain == "local" ||
 		rv.domain == "stats_reader" {
-		s.authCache.Add(key, userIdentity{rv.name, rv.domain})
+		s.authCache.Add(key, userIdentity{user: rv.name, domain: rv.domain})
 	}
 	return rv, nil
 }
@@ -1570,14 +1570,26 @@ func MaybeGetCredsFromCert(s *Svc, tlsState *tls.ConnectionState) (*CredsImpl, e
 		val, found := s.clientCertCache.Get(key)
 		if found {
 			ui, _ := val.(*userIdentity)
+			if ui.user == "" {
+				return nil, nil
+			}
 			creds := &CredsImpl{name: ui.user, domain: ui.domain, s: s}
 			return creds, nil
 		}
 
 		creds, _ := getUserIdentityFromCert(cert, db, s)
 		if creds != nil {
+			// ns_server names no user when the certificate is not accepted as
+			// proof of identity on its own. That is not a failure: returning
+			// nil makes the caller fall through to the authorization header,
+			// exactly as a request carrying no certificate does. The empty
+			// identity is cached like any other, so this costs one round trip
+			// per certificate rather than one per request.
 			ui := &userIdentity{user: creds.name, domain: creds.domain}
 			s.clientCertCache.Add(key, interface{}(ui))
+			if creds.name == "" {
+				return nil, nil
+			}
 			return creds, nil
 		}
 
