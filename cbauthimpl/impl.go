@@ -131,6 +131,10 @@ var ErrCallbackAlreadyRegistered = errors.New("Certificate refresh callback is a
 // ErrUserNotFound is used to signal when username can't be extracted from client certificate.
 var ErrUserNotFound = errors.New("Username not found")
 
+// ErrClientCertificateRequired is used to signal that client certificate
+// authentication is mandatory but no certificate was presented.
+var ErrClientCertificateRequired = errors.New("Client certificate is required")
+
 // ErrCredentialsExpired is returned when credentials have expired
 var ErrCredentialsExpired = errors.New("Credentials have expired")
 
@@ -1555,6 +1559,12 @@ func MaybeGetCredsFromCert(s *Svc, tlsState *tls.ConnectionState) (*CredsImpl, e
 		return nil, nil
 	} else if cAuthType == tls.VerifyClientCertIfGiven && len(tlsState.PeerCertificates) == 0 {
 		return nil, nil
+	} else if len(tlsState.PeerCertificates) == 0 {
+		// Only mandatory reaches here with no certificate. The listener is
+		// expected to require one in that case, so the handshake rejects
+		// such a client and this cannot happen, but that is up to each
+		// service and is not guaranteed.
+		return nil, ErrClientCertificateRequired
 	} else {
 		// The leaf certificate is the one which will have the username
 		// encoded into it and it's the first entry in 'PeerCertificates'.
