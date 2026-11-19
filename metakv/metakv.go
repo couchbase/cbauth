@@ -288,8 +288,10 @@ func doRunObserveChildren(s *store, dirpath string, callback callbackInt,
 
 	go func() {
 		dec := json.NewDecoder(r.Body)
-		var kve kvEntry
 		for {
+			// Decoding into a reused entry would make every entry share
+			// the Value and Rev buffers.
+			var kve kvEntry
 			err := dec.Decode(&kve)
 			if err != nil {
 				errChan <- err
